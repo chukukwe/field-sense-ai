@@ -78,9 +78,6 @@ export const SettingsScreen: React.FC = () => {
             <span>{installSuccess ? 'App Installed!' : 'Install Field Voice AI'}</span>
           </button>
 
-          <p className="text-[11px] text-[#8F9490] leading-snug">
-            Tap Chrome options (:) and choose "Install app" or "Add to Home screen".
-          </p>
         </div>
 
         {/* Card 2: Language & Voice */}

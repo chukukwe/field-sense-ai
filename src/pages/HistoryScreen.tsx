@@ -135,6 +135,7 @@ export const HistoryScreen: React.FC = () => {
                 <div className="flex items-center gap-3 mb-3">
                   <ScanImage
                     scan={item}
+                    fallbackIconOnly
                     alt={item.title}
                     className="w-12 h-12 rounded-xl object-cover bg-[#181B19] shrink-0"
                     loading="lazy"

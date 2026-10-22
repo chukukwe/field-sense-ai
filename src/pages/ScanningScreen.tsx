@@ -11,7 +11,7 @@ import { uploadCropPhoto } from '../data/photoApi';
 const SCANNING_STEPS = [
   'Preparing your photo…',
   'Saving crop and observation details…',
-  'Keeping your scan on this device…',
+  'Syncing your photo to your account…',
   'Sending your photo for assessment…',
   'Opening your saved scan…',
 ];
@@ -55,8 +55,8 @@ export const ScanningScreen: React.FC = () => {
     return () => clearInterval(dotsInterval);
   }, []);
 
-  // Save the photo locally and the scan metadata before requesting Gemini.
-  // The API receives the locally stored Blob; no cloud photo store is used.
+  // Keep a local recovery copy, save the scan record, and sync the image to
+  // private cloud storage before requesting an assessment.
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (hasSubmitted.current) return;
@@ -91,9 +91,31 @@ export const ScanningScreen: React.FC = () => {
       } else if (!scanDraft.cropType) {
         await markScanFailed(scan.id, 'Choose a crop type before requesting an assessment.');
       } else {
+        let photoUploadError = '';
         let localPhoto: Blob | undefined;
         try {
           localPhoto = await getScanPhoto(scan.photoStorageKey);
+          if (!localPhoto) throw new Error('The saved photo could not be read from this device.');
+          if (!user) throw new Error('Sign in again before requesting an assessment.');
+        } catch (error) {
+          photoUploadError = error instanceof Error
+            ? error.message
+            : 'The photo could not be read from this device.';
+        }
+
+        // Upload immediately after the authenticated scan record exists. The
+        // backend confirms only after both the private object and Firestore
+        // reference are saved. Keep IndexedDB until that confirmation arrives.
+        if (localPhoto && user) {
+          try { await uploadCropPhoto({ scanId: scan.id, image: localPhoto, idToken: await user.getIdToken() }); }
+          catch (error) {
+            photoUploadError = error instanceof Error
+              ? error.message
+              : 'The photo could not be saved to your account. It remains on this device for now.';
+          }
+        }
+
+        try {
           if (!localPhoto) throw new Error('The saved photo could not be read from this device.');
           if (!user) throw new Error('Sign in again before requesting an assessment.');
           const assessment = await requestCropAssessment({
@@ -107,12 +129,8 @@ export const ScanningScreen: React.FC = () => {
         } catch (error) {
           await markScanFailed(scan.id, error instanceof Error ? error.message : 'The assessment could not be completed. You can retry this scan.');
         }
-        // The API returns success only after the private object is uploaded and
-        // the Firestore reference has been updated. Keep IndexedDB as fallback.
-        if (localPhoto && user) {
-          try { await uploadCropPhoto({ scanId: scan.id, image: localPhoto, idToken: await user.getIdToken() }); }
-          catch { /* Scan Details offers a retry/migration action; local data stays intact. */ }
-        }
+        navigate(`/assessment/${scan.id}`, { state: photoUploadError ? { photoUploadError } : null });
+        return;
       }
       navigate(`/assessment/${scan.id}`);
     }, 3600);

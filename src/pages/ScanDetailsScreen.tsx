@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Camera, Clock, Trash2, Image as ImageIcon } from 'lucide-react';
 import { TopHeader } from '../components/common/TopHeader';
@@ -6,6 +6,7 @@ import { ScanImage } from '../components/common/ScanImage';
 import { useApp } from '../context/useApp';
 import { useAuth } from '../context/useAuth';
 import { CropPhotoRequestError, uploadLocalScanPhoto, getCloudCropPhoto } from '../data/photoApi';
+import { simpleConfidence, simpleLikelihood } from '../data/assessmentLanguage';
 
 export const ScanDetailsScreen: React.FC = () => {
   const navigate = useNavigate();
@@ -17,7 +18,9 @@ export const ScanDetailsScreen: React.FC = () => {
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoMessage, setPhotoMessage] = useState('');
   const [photoReload, setPhotoReload] = useState(0);
+  const [canRetryUpload, setCanRetryUpload] = useState(false);
   const photoInput = useRef<HTMLInputElement>(null);
+  const autoUploadAttempt = useRef('');
 
   const scan = scans.find((item) => item.id === id);
   const diagnosis = scan?.diagnosis;
@@ -35,29 +38,48 @@ export const ScanDetailsScreen: React.FC = () => {
     }
   };
 
-  const uploadExistingPhoto = async (replacement?: File) => {
-    if (!scan || !user) {
+  const uploadExistingPhoto = useCallback(async (
+    scanToUpload: typeof scan,
+    authenticatedUser: typeof user,
+    replacement?: File,
+    openPickerWhenMissing = true,
+  ) => {
+    if (!scanToUpload || !authenticatedUser) {
       setPhotoMessage('Sign in again before saving this photo.');
       return;
     }
     setPhotoBusy(true);
     setPhotoMessage('');
     try {
-      if (!replacement && !scan.photoStorageKey) {
-        photoInput.current?.click();
+      if (!replacement && !scanToUpload.photoStorageKey) {
+        if (openPickerWhenMissing) photoInput.current?.click();
         setPhotoMessage('The original photo is not saved on this device. Choose the original file to restore it.');
         return;
       }
-      await uploadLocalScanPhoto({ scanId: scan.id, photoStorageKey: scan.photoStorageKey ?? scan.id, idToken: await user.getIdToken(), replacement });
+      await uploadLocalScanPhoto({ scanId: scanToUpload.id, photoStorageKey: scanToUpload.photoStorageKey ?? scanToUpload.id, idToken: await authenticatedUser.getIdToken(), replacement });
+      setCanRetryUpload(false);
       setPhotoMessage('Photo saved to your account. It will be available on your other signed-in devices.');
       setPhotoReload((value) => value + 1);
     } catch (error) {
-      if (error instanceof CropPhotoRequestError && error.code === 'LEGACY_PHOTO_MISSING') photoInput.current?.click();
+      const missingLocalPhoto = error instanceof CropPhotoRequestError && error.code === 'LEGACY_PHOTO_MISSING';
+      setCanRetryUpload(!missingLocalPhoto);
+      if (missingLocalPhoto && openPickerWhenMissing) photoInput.current?.click();
       setPhotoMessage(error instanceof Error ? `${error.message} Your local photo is still kept; retry when ready.` : 'Photo upload failed. Your local photo is still kept; retry when ready.');
     } finally {
       setPhotoBusy(false);
     }
-  };
+  }, []);
+
+  // Older scans created before automatic cloud sync are migrated when their
+  // original device opens Scan Details. Keep the local bytes as a fallback.
+  useEffect(() => {
+    if (!scan || scan.dataScope !== 'cloud' || scan.cloudPhotoPath || scan.photoScope !== 'local-only' || !scan.photoStorageKey || !user) return;
+    const attemptKey = `${scan.id}:${scan.photoStorageKey}`;
+    if (autoUploadAttempt.current === attemptKey) return;
+    autoUploadAttempt.current = attemptKey;
+    setPhotoMessage('Syncing this photo to your account…');
+    void uploadExistingPhoto(scan, user, undefined, false);
+  }, [scan, user, uploadExistingPhoto]);
 
   const retryPhotoLoad = async () => {
     if (!scan?.cloudPhotoPath || !user) return;
@@ -109,7 +131,7 @@ export const ScanDetailsScreen: React.FC = () => {
             alt={scan.title}
             className="w-full h-full object-cover"
           />
-          <span className="absolute top-3 left-3 bg-black/60 backdrop-blur-md text-white text-[11px] px-3 py-1 rounded-full font-medium flex items-center gap-1.5 border border-white/10">
+          <span className="absolute top-3 left-3 bg-black/60 backdrop-blur-md text-white text-[11px] px-4 py-2 rounded-full font-medium flex items-center gap-1.5 border border-white/10">
             <ImageIcon className="w-3.5 h-3.5 shrink-0" />
             {scan.cropType} • Scanned {scan.date}
           </span>
@@ -119,23 +141,22 @@ export const ScanDetailsScreen: React.FC = () => {
           <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => {
             const selected = event.currentTarget.files?.[0];
             event.currentTarget.value = '';
-            if (selected) void uploadExistingPhoto(selected);
+            if (selected) void uploadExistingPhoto(scan, user, selected);
           }} />
           {scan.cloudPhotoPath ? (
             <>
               <button disabled={photoBusy} onClick={() => void retryPhotoLoad()} className="self-start text-xs font-semibold text-[#1EB968] disabled:opacity-50">
                 {photoBusy ? 'Loading photo…' : 'Retry loading photo'}
               </button>
-              <button disabled={photoBusy} onClick={() => void uploadExistingPhoto()} className="self-start text-xs font-semibold text-[#1EB968] disabled:opacity-50">Retry photo upload</button>
             </>
           ) : (
-            <button disabled={photoBusy} onClick={() => void uploadExistingPhoto()} className="self-start text-xs font-semibold text-[#1EB968] disabled:opacity-50">
-              {photoBusy ? 'Saving photo…' : 'Save photo to your account'}
+            canRetryUpload && <button disabled={photoBusy} onClick={() => void uploadExistingPhoto(scan, user, undefined, false)} className="self-start text-xs font-semibold text-[#1EB968] disabled:opacity-50">
+              {photoBusy ? 'Syncing photo…' : 'Retry cloud sync'}
             </button>
           )}
           <button disabled={photoBusy} onClick={() => photoInput.current?.click()} className="self-start text-xs text-[#D1D5DB] disabled:opacity-50">Choose original photo</button>
           {photoMessage && <p role="status" className="text-[11px] text-[#D1D5DB] leading-relaxed">{photoMessage}</p>}
-          {!scan.cloudPhotoPath && scan.photoScope === 'local-only' && <p className="text-[11px] text-[#8F9490]">This photo is currently stored on this device. Upload it so it can be viewed after login on another device.</p>}
+          {!scan.cloudPhotoPath && scan.photoScope === 'local-only' && <p className="text-[11px] text-[#8F9490]">This photo is stored on this device. We’ll sync it to your account automatically when cloud storage is available.</p>}
         </div>
 
         {/* ── What Was Found ── */}
@@ -192,7 +213,7 @@ export const ScanDetailsScreen: React.FC = () => {
                 <div>
                   <span className="text-[11px] font-bold text-[#FF8A32] block mb-0.5">{assessment.status === 'inconclusive' ? 'Inconclusive visual assessment' : 'AI-assisted visual assessment'}</span>
                   <h4 className="text-sm font-bold text-white mb-1 leading-snug">{assessment.summary}</h4>
-                  <p className="text-[11px] text-[#A1A7A3]">Crop: {assessment.cropIdentification} · Qualitative confidence: {assessment.confidence}</p>
+                  <p className="text-[11px] text-[#A1A7A3]">Crop: {assessment.cropIdentification} · How sure: {simpleConfidence(assessment.confidence)}</p>
                   <p className="text-[11px] text-[#A1A7A3] mt-1">{assessment.confidenceReason}</p>
                 </div>
                 {!!assessment.observedSymptoms.length && <div>
@@ -202,7 +223,7 @@ export const ScanDetailsScreen: React.FC = () => {
                 {!!assessment.possibleCauses.length && <div>
                   <h5 className="text-xs font-bold text-white mb-1">Possible causes</h5>
                   <div className="flex flex-col gap-2">{assessment.possibleCauses.map((cause, index) => <div key={`${index}-${cause.name}`} className="bg-[#383B39] p-3 rounded-xl">
-                    <p className="text-xs font-bold text-white">{cause.name} <span className="text-[#FF8A32] font-medium">· {cause.likelihood.replace('_', ' ')}</span></p>
+                  <p className="text-xs font-bold text-white">{cause.name} <span className="text-[#FF8A32] font-medium">· {simpleLikelihood(cause.likelihood)}</span></p>
                     <p className="text-[11px] text-[#D1D5DB] mt-1 leading-relaxed">{cause.explanation}</p>
                   </div>)}</div>
                 </div>}
@@ -289,10 +310,10 @@ export const ScanDetailsScreen: React.FC = () => {
             Scan Another Crop
           </button>
 
-          <div className="flex items-center justify-between px-1">
+          <div className="flex w-full items-center gap-2">
             <button
               onClick={() => navigate('/history')}
-              className="text-xs text-[#D1D5DB] hover:text-white flex items-center gap-1.5 transition cursor-pointer py-2"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-white/10 px-6 py-4 text-xs text-[#D1D5DB] transition hover:bg-white/15 hover:text-white cursor-pointer"
             >
               <Clock className="w-4 h-4 text-gray-400" />
               <span>View History</span>
@@ -300,7 +321,7 @@ export const ScanDetailsScreen: React.FC = () => {
 
             <button
               onClick={() => setShowDeleteModal(true)}
-              className="text-xs text-[#E04141] hover:underline flex items-center gap-1.5 transition cursor-pointer py-2"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-red-500/10 px-6 py-4 text-xs text-[#E04141] transition hover:bg-red-500/15 hover:underline cursor-pointer"
             >
               <Trash2 className="w-4 h-4" />
               <span>Delete Scan</span>

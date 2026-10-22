@@ -7,7 +7,10 @@ import { fileTypeFromBuffer } from 'file-type';
 import sharp from 'sharp';
 import { z } from 'zod';
 import { assessmentSchema, cropTypes, type CropAssessmentResult } from './assessmentSchema.js';
-import type { WeatherForecast } from './weather.js';
+import type { DeviceLocationCoordinates, ResolvedNigeriaLocation } from './location.js';
+import { NimetServiceError, type SeasonalRainfallRequest, type SeasonalRainfallResult } from './nimet.js';
+import type { SeasonRecommendationService } from './seasonRecommendations.js';
+import type { WeatherForecast, WeatherRequestLocation } from './weather.js';
 
 const scanIdSchema = z.string().regex(/^scan-[a-zA-Z0-9-]{1,80}$/);
 const cropSchema = z.enum(cropTypes);
@@ -24,7 +27,10 @@ export interface AnalyzeDependencies {
   weatherLimiterMax?: number;
   maxImageBytes?: number;
   photoStore?: PhotoStoreDependencies;
-  getWeatherForecast?: () => Promise<WeatherForecast>;
+  getWeatherForecast?: (location: WeatherRequestLocation) => Promise<WeatherForecast>;
+  resolveDeviceLocation?: (coordinates: DeviceLocationCoordinates) => Promise<ResolvedNigeriaLocation | null>;
+  seasonRecommendations?: SeasonRecommendationService;
+  getSeasonalRainfall?: (request: SeasonalRainfallRequest) => Promise<SeasonalRainfallResult>;
 }
 
 export interface PhotoRecord {
@@ -87,17 +93,123 @@ export function createApp(deps: AnalyzeDependencies) {
     standardHeaders: 'draft-8',
     legacyHeaders: false,
   });
-  app.get('/api/season/weather', weatherAuth, weatherLimiter, (req, res) => {
+  const locationLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: Math.min(deps.weatherLimiterMax ?? 30, 10),
+    keyGenerator: (req) => (req as express.Request & { weatherUid?: string }).weatherUid ?? 'unverified',
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  });
+  // The season calendar is shared draft reference data, not user data. Keep it
+  // readable without an account so Firebase sign-in cannot block the selectors.
+  const seasonDataLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    // The state/LGA selectors are shared reference data. A single IP can
+    // legitimately request many LGAs while exploring locations, so keep a
+    // generous limit here without changing weather or authenticated limits.
+    limit: 300,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  });
+  app.get('/api/season/states', seasonDataLimiter, (_req, res) => {
+    if (!deps.seasonRecommendations) return sendError(res, 503, 'SEASON_DATA_UNAVAILABLE', 'Season planning data is not available right now.', true);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    return res.json({ states: deps.seasonRecommendations.listStates() });
+  });
+  app.get('/api/season/states/:stateId/lgas', seasonDataLimiter, (req, res) => {
+    if (!deps.seasonRecommendations) return sendError(res, 503, 'SEASON_DATA_UNAVAILABLE', 'Season planning data is not available right now.', true);
+    const stateIdParam = req.params.stateId;
+    const stateId = typeof stateIdParam === 'string' && /^\d+$/.test(stateIdParam) ? Number(stateIdParam) : NaN;
+    if (!Number.isSafeInteger(stateId) || stateId < 1) return sendError(res, 400, 'STATE_INVALID', 'Choose a valid state.');
+    const result = deps.seasonRecommendations.listLgas(stateId);
+    if (!result) return sendError(res, 404, 'STATE_NOT_FOUND', 'That state was not found in the crop database.');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    return res.json(result);
+  });
+  app.get('/api/season/recommendations/:lgaId', seasonDataLimiter, (req, res) => {
+    if (!deps.seasonRecommendations) return sendError(res, 503, 'SEASON_DATA_UNAVAILABLE', 'Season planning data is not available right now.', true);
+    const lgaIdParam = req.params.lgaId;
+    const lgaId = typeof lgaIdParam === 'string' && /^\d+$/.test(lgaIdParam) ? Number(lgaIdParam) : NaN;
+    if (!Number.isSafeInteger(lgaId) || lgaId < 1) return sendError(res, 400, 'LGA_INVALID', 'Choose a valid local government area.');
+    const plan = deps.seasonRecommendations.getPlan(lgaId);
+    if (!plan) return sendError(res, 404, 'LGA_NOT_FOUND', 'That local government area was not found in the crop database.');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    return res.json(plan);
+  });
+  app.get('/api/season/rainfall', seasonDataLimiter, (req, res) => {
     void (async () => {
-      if (req.query.location !== 'eket') return sendError(res, 400, 'LOCATION_UNSUPPORTED', 'Weather is currently available for Eket, Akwa Ibom only.');
+      if (!deps.seasonRecommendations) return sendError(res, 503, 'SEASON_DATA_UNAVAILABLE', 'Season planning data is not available right now.', true);
+      const lgaId = typeof req.query.lgaId === 'string' && /^\d+$/.test(req.query.lgaId) ? Number(req.query.lgaId) : NaN;
+      const year = typeof req.query.year === 'string' && /^\d{4}$/.test(req.query.year) ? Number(req.query.year) : NaN;
+      if (!Number.isSafeInteger(lgaId) || lgaId < 1) return sendError(res, 400, 'LGA_INVALID', 'Choose a valid local government area.');
+      if (!Number.isSafeInteger(year) || year < 2000 || year > 2100) return sendError(res, 400, 'YEAR_INVALID', 'Choose a valid year.');
+      const plan = deps.seasonRecommendations.getPlan(lgaId);
+      if (!plan) return sendError(res, 404, 'LGA_NOT_FOUND', 'That local government area was not found in the crop database.');
+      if (!deps.getSeasonalRainfall) return sendError(res, 503, 'NIMET_NOT_CONFIGURED', 'NiMet data is not set up yet. Add NIMET_API_KEY to the backend environment, then restart the server.', true);
+      try {
+        const result = await deps.getSeasonalRainfall({ state: plan.location.state, lga: plan.location.lga, year });
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        return res.json(result);
+      } catch (error) {
+        if (error instanceof NimetServiceError) return sendError(res, error.status, error.code, error.publicMessage, error.retryable);
+        return sendError(res, 503, 'NIMET_UNAVAILABLE', 'NiMet could not return rainfall data right now. Try again later.', true);
+      }
+    })().catch(() => sendError(res, 503, 'NIMET_UNAVAILABLE', 'NiMet could not return rainfall data right now. Try again later.', true));
+  });
+  app.post('/api/season/location', weatherAuth, locationLimiter, (req, res) => {
+    express.json({ limit: '1kb' })(req, res, (error?: unknown) => {
+      void (async () => {
+        if (error) return sendError(res, 400, 'LOCATION_INVALID', 'The device location could not be read. Try again.');
+        const body: unknown = req.body;
+        if (typeof body !== 'object' || body === null || Array.isArray(body)) return sendError(res, 400, 'LOCATION_INVALID', 'A valid device location is required.');
+        const coordinates = body as { latitude?: unknown; longitude?: unknown };
+        if (Object.keys(body).some((key) => key !== 'latitude' && key !== 'longitude')
+          || typeof coordinates.latitude !== 'number' || !Number.isFinite(coordinates.latitude)
+          || coordinates.latitude < -90 || coordinates.latitude > 90
+          || typeof coordinates.longitude !== 'number' || !Number.isFinite(coordinates.longitude)
+          || coordinates.longitude < -180 || coordinates.longitude > 180) {
+          return sendError(res, 400, 'LOCATION_INVALID', 'The device returned invalid coordinates. Try again.');
+        }
+        if (!deps.resolveDeviceLocation) return sendError(res, 503, 'LOCATION_UNAVAILABLE', 'Your farming zone could not be identified. Weather can still be used. Try again later.', true);
+        try {
+          const location = await deps.resolveDeviceLocation({ latitude: coordinates.latitude, longitude: coordinates.longitude });
+          res.setHeader('Cache-Control', 'private, no-store');
+          return res.json({ location });
+        } catch {
+          return sendError(res, 503, 'LOCATION_UNAVAILABLE', 'Your farming zone could not be identified right now. Weather can still be used. Try again later.', true);
+        }
+      })().catch(() => sendError(res, 503, 'LOCATION_UNAVAILABLE', 'Your farming zone could not be identified right now. Weather can still be used. Try again later.', true));
+    });
+  });
+  const sendWeatherForecast = (res: express.Response, location: WeatherRequestLocation) => {
+    void (async () => {
       if (!deps.getWeatherForecast) return sendError(res, 503, 'WEATHER_UNAVAILABLE', 'The weather forecast is temporarily unavailable. Try again later.', true);
       try {
-        const forecast = await deps.getWeatherForecast();
+        const forecast = await deps.getWeatherForecast(location);
         res.setHeader('Cache-Control', 'private, no-store');
         return res.json(forecast);
-      }
-      catch { return sendError(res, 503, 'WEATHER_UNAVAILABLE', 'The weather forecast is temporarily unavailable. Try again later.', true); }
+      } catch { return sendError(res, 503, 'WEATHER_UNAVAILABLE', 'The weather forecast is temporarily unavailable. Try again later.', true); }
     })().catch(() => sendError(res, 503, 'WEATHER_UNAVAILABLE', 'The weather forecast is temporarily unavailable. Try again later.', true));
+  };
+  app.get('/api/season/weather', weatherAuth, weatherLimiter, (req, res) => {
+    if (req.query.location !== 'eket') return sendError(res, 400, 'LOCATION_UNSUPPORTED', 'Enter Eket for sample crop cards, or allow device location for local weather.');
+    sendWeatherForecast(res, { kind: 'eket' });
+  });
+  app.post('/api/season/weather', weatherAuth, weatherLimiter, (req, res) => {
+    express.json({ limit: '1kb' })(req, res, (error?: unknown) => {
+      if (error) return sendError(res, 400, 'LOCATION_INVALID', 'The device location could not be read. Try again or enter Eket manually.');
+      const body: unknown = req.body;
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) return sendError(res, 400, 'LOCATION_INVALID', 'A valid device location is required.');
+      const coordinates = body as { latitude?: unknown; longitude?: unknown };
+      if (Object.keys(body).some((key) => key !== 'latitude' && key !== 'longitude')
+        || typeof coordinates.latitude !== 'number' || !Number.isFinite(coordinates.latitude)
+        || coordinates.latitude < -90 || coordinates.latitude > 90
+        || typeof coordinates.longitude !== 'number' || !Number.isFinite(coordinates.longitude)
+        || coordinates.longitude < -180 || coordinates.longitude > 180) {
+        return sendError(res, 400, 'LOCATION_INVALID', 'The device returned invalid coordinates. Try again or enter Eket manually.');
+      }
+      sendWeatherForecast(res, { kind: 'coordinates', latitude: coordinates.latitude, longitude: coordinates.longitude });
+    });
   });
   const photoStore = deps.photoStore;
   if (photoStore) {

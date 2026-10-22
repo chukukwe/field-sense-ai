@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { forecastCoverage, isValidWeatherForecast, requestEketForecast, SeasonWeatherError, weatherObservation, type WeatherForecast } from '../../src/data/seasonSense.js';
-import { getRecommendationEvidenceGap, getSeasonRecommendations, matchSupportedLocation, seasonSenseSources } from '../../src/data/seasonRecommendations.js';
+import { forecastCoverage, isValidWeatherForecast, requestDeviceCoordinates, requestEketForecast, requestFarmingLocation, requestWeatherForecast, DeviceLocationError, FarmingLocationError, SeasonWeatherError, weatherObservation, type WeatherForecast } from '../../src/data/seasonSense.js';
+import { getRecommendationEvidenceGap, getSeasonRecommendations, getSouthernPlanningRecommendations, getZoneDemoRecommendations, getZoneSampleSeason, isSouthernPlanningRegion, matchSupportedLocation, seasonSenseSources } from '../../src/data/seasonRecommendations.js';
+import { nigeriaFarmingZones } from '../../src/data/nigeriaRegions.js';
+import { seasonDemoRecommendations } from '../../src/data/seasonDemo.js';
 
 const forecast: WeatherForecast = {
   locationId: 'eket', locationLabel: 'Eket, Akwa Ibom', source: 'Open-Meteo',
+  latitude: 4.636638, longitude: 7.953654,
+  timeZone: 'Africa/Lagos',
   retrievedAt: '2026-10-22T10:00:00.000Z',
+  current: { observedAtLocal: '2026-10-22T11:00', temperatureC: 28, relativeHumidityPct: 72, precipitationMm: 0 },
   forecastDays: [{ date: '2026-10-22', precipitationMm: 4.5, precipitationProbabilityPct: 70, temperatureMinC: 23, temperatureMaxC: 30 }],
 };
 
@@ -17,6 +22,15 @@ describe('SeasonSense recommendation and weather helpers', () => {
     assert.equal(matchSupportedLocation('Uyo, Akwa Ibom'), null);
     assert.equal(getSeasonRecommendations('uyo', '2026-04-01').status, 'unsupported-location');
     assert.equal(getSeasonRecommendations('eket', '2026-02-31').status, 'invalid-date');
+  });
+
+  it('shows a source-based southern Nigeria planning list independently from device weather', () => {
+    assert.equal(isSouthernPlanningRegion('Southern Nigeria'), true);
+    assert.equal(isSouthernPlanningRegion('South Nigeria'), true);
+    assert.equal(isSouthernPlanningRegion('Uyo, Akwa Ibom'), false);
+    const plan = getSouthernPlanningRecommendations();
+    assert.deepEqual(plan.map((crop) => crop.id), ['maize', 'cassava']);
+    assert.ok(plan.every((crop) => crop.sources.length > 0 && crop.plantingWindow.length > 0));
   });
 
   it('returns only crops whose cited planting windows include the selected date', () => {
@@ -48,6 +62,43 @@ describe('SeasonSense recommendation and weather helpers', () => {
     assert.match(seasonSenseSources.nimet.limitation, /not an Eket-specific crop recommendation/);
   });
 
+  it('filters the sample crop list by NAERLS farming zone and broad current season', () => {
+    assert.equal(nigeriaFarmingZones.length, 7);
+    for (const zone of nigeriaFarmingZones) {
+      const rainySeason = getZoneDemoRecommendations(zone, '2026-07-15');
+      const drySeason = getZoneDemoRecommendations(zone, '2026-01-15');
+      assert.ok(rainySeason.length >= 5, `${zone} has a useful sample list for the rainy-season preview`);
+      assert.ok(drySeason.length >= 3, `${zone} has a useful sample list for the dry-season preview`);
+      assert.ok(rainySeason.every((crop) => crop.sources.length === 0 && /sample/i.test(crop.why)));
+    }
+    assert.equal(getZoneSampleSeason('Humid Forest', '2026-10-22'), 'rainy-season sample');
+    assert.equal(getZoneSampleSeason('Sahel Savanna', '2026-10-22'), 'dry-season sample');
+    assert.notDeepEqual(
+      getZoneDemoRecommendations('Sahel Savanna', '2026-07-15').map((crop) => crop.id),
+      getZoneDemoRecommendations('Humid Forest', '2026-07-15').map((crop) => crop.id),
+    );
+  });
+
+  it('requests an authenticated farming-zone lookup and validates its result', async () => {
+    let url = '';
+    let body = '';
+    let authorization = '';
+    const location = { country: 'Nigeria' as const, state: 'Akwa Ibom', localArea: 'Eket', zone: 'Humid Forest' as const };
+    const result = await requestFarmingLocation('location-token', { latitude: 4.65, longitude: 7.93 }, async (input, init) => {
+      url = String(input);
+      body = String(init?.body);
+      authorization = new Headers(init?.headers).get('authorization') ?? '';
+      return Response.json({ location });
+    });
+    assert.equal(url, '/api/season/location');
+    assert.equal(body, JSON.stringify({ latitude: 4.65, longitude: 7.93 }));
+    assert.equal(authorization, 'Bearer location-token');
+    assert.deepEqual(result, location);
+    assert.equal(await requestFarmingLocation('token', { latitude: 4.65, longitude: 7.93 }, async () => Response.json({ location: null })), null);
+    await assert.rejects(requestFarmingLocation('token', { latitude: 4.65, longitude: 7.93 }, async () => Response.json({ location: { ...location, zone: 'Political Zone' } })), FarmingLocationError);
+    await assert.rejects(requestFarmingLocation('token', { latitude: 91, longitude: 7.93 }, async () => Response.json({ location })), FarmingLocationError);
+  });
+
   it('sends an authenticated weather request and accepts valid returned values', async () => {
     let url = '';
     let authorization = '';
@@ -61,11 +112,77 @@ describe('SeasonSense recommendation and weather helpers', () => {
     assert.deepEqual(result, forecast);
   });
 
+  it('requests device location only through the click handler helper and uses bounded high-accuracy options', async () => {
+    let options: { enableHighAccuracy: boolean; timeout: number; maximumAge: number } | undefined;
+    const coords = await requestDeviceCoordinates({
+      getCurrentPosition(onSuccess, _onError, requestOptions) {
+        options = requestOptions;
+        onSuccess({ coords: { latitude: 5.4, longitude: 7.8 } });
+      },
+    });
+    assert.deepEqual(coords, { latitude: 5.4, longitude: 7.8 });
+    assert.deepEqual(options, { enableHighAccuracy: true, timeout: 15_000, maximumAge: 30_000 });
+  });
+
+  it('shows clear device-location errors for unsupported browsers, denied access, unavailable position, and timeout', async () => {
+    await assert.rejects(requestDeviceCoordinates(undefined), (error: unknown) => error instanceof DeviceLocationError && error.code === 'UNSUPPORTED');
+    for (const [browserCode, expectedCode] of [[1, 'PERMISSION_DENIED'], [2, 'POSITION_UNAVAILABLE'], [3, 'TIMEOUT']] as const) {
+      await assert.rejects(requestDeviceCoordinates({
+        getCurrentPosition(_onSuccess, onError) { onError({ code: browserCode }); },
+      }), (error: unknown) => error instanceof DeviceLocationError && error.code === expectedCode);
+    }
+    await assert.rejects(requestDeviceCoordinates({
+      getCurrentPosition(onSuccess) { onSuccess({ coords: { latitude: 91, longitude: 7.8 } }); },
+    }), (error: unknown) => error instanceof DeviceLocationError && error.code === 'INVALID_COORDINATES');
+  });
+
+  it('sends device coordinates to the authenticated backend without converting them to an Eket request', async () => {
+    const deviceForecast: WeatherForecast = {
+      ...forecast,
+      locationId: 'device',
+      locationLabel: 'Current location',
+      latitude: 5.4,
+      longitude: 7.8,
+      timeZone: 'Africa/Lagos',
+    };
+    let method = '';
+    let body = '';
+    let authorization = '';
+    const result = await requestWeatherForecast('device-token', { kind: 'coordinates', latitude: 5.4, longitude: 7.8 }, async (input, init) => {
+      assert.equal(String(input), '/api/season/weather');
+      method = init?.method ?? '';
+      body = String(init?.body ?? '');
+      authorization = new Headers(init?.headers).get('authorization') ?? '';
+      return Response.json(deviceForecast);
+    });
+    assert.equal(method, 'POST');
+    assert.deepEqual(JSON.parse(body), { latitude: 5.4, longitude: 7.8 });
+    assert.equal(authorization, 'Bearer device-token');
+    assert.deepEqual(result, deviceForecast);
+    await assert.rejects(requestWeatherForecast('token', { kind: 'coordinates', latitude: 91, longitude: 0 }, async () => Response.json(deviceForecast)), (error: unknown) => error instanceof SeasonWeatherError && error.code === 'LOCATION_INVALID');
+    await assert.rejects(requestWeatherForecast('token', { kind: 'coordinates', latitude: 5.4, longitude: 7.8 }, async () => Response.json({ ...deviceForecast, latitude: 4.636638 })), (error: unknown) => error instanceof SeasonWeatherError && error.code === 'INVALID_RESPONSE');
+  });
+
+  it('accepts missing optional values without inventing them and validates the Eket timezone', () => {
+    const partial = {
+      ...forecast,
+      current: { observedAtLocal: '2026-10-22T11:00', temperatureC: 28 },
+      forecastDays: [{ date: '2026-10-22', temperatureMinC: 23, temperatureMaxC: 30 }],
+    };
+    assert.equal(isValidWeatherForecast(partial), true);
+    assert.equal(isValidWeatherForecast({ ...partial, timeZone: 'UTC' }), false);
+    assert.equal(isValidWeatherForecast({ ...partial, current: { observedAtLocal: '2026-02-31T11:00', temperatureC: 28 } }), false);
+    assert.equal(isValidWeatherForecast({ ...partial, current: { observedAtLocal: '2026-10-22T11:00', relativeHumidityPct: 101 } }), false);
+    assert.equal(isValidWeatherForecast({ ...partial, forecastDays: [{ date: '2026-10-22' }] }), false);
+  });
+
   it('reports unavailable, malformed, and network weather responses without fabricating values', async () => {
     await assert.rejects(requestEketForecast('token', async () => Response.json({ error: { message: 'Weather unavailable.' } }, { status: 503 })), (error: unknown) => error instanceof SeasonWeatherError && error.code === 'WEATHER_UNAVAILABLE');
     await assert.rejects(requestEketForecast('token', async () => Response.json({ ...forecast, forecastDays: [] })), (error: unknown) => error instanceof SeasonWeatherError && error.code === 'INVALID_RESPONSE');
     await assert.rejects(requestEketForecast('token', async () => Response.json({ ...forecast, forecastDays: [{ ...forecast.forecastDays[0]!, date: '2026-02-31' }] })), (error: unknown) => error instanceof SeasonWeatherError && error.code === 'INVALID_RESPONSE');
-    await assert.rejects(requestEketForecast('token', async () => { throw new Error('offline'); }), (error: unknown) => error instanceof SeasonWeatherError && error.code === 'NETWORK_ERROR');
+    await assert.rejects(requestEketForecast('token', async () => { throw new Error('offline'); }), (error: unknown) => error instanceof SeasonWeatherError
+      && error.code === 'NETWORK_ERROR'
+      && error.message === 'Could not reach the weather service. Weather is optional; you can retry.');
   });
 
   it('validates forecast coverage and keeps weather observations limited to returned forecast days', () => {
@@ -81,6 +198,14 @@ describe('SeasonSense recommendation and weather helpers', () => {
     assert.deepEqual(forecastCoverage(complete), { start: '2026-10-22', end: '2026-10-28' });
     assert.equal(forecastCoverage({ ...forecast, forecastDays: [] }), null);
     assert.match(weatherObservation('cassava', { ...forecast, forecastDays: [{ ...forecast.forecastDays[0]!, precipitationMm: 0 }] }) ?? '', /does not confirm dry soil or a season-long dry spell/);
+    assert.match(weatherObservation('cassava', { ...forecast, forecastDays: [{ date: '2026-10-22', temperatureMinC: 23 }] }) ?? '', /did not return rainfall values/);
     assert.equal(weatherObservation('cassava', null), null);
+  });
+
+  it('keeps sample crop cards available when the optional weather request fails', async () => {
+    const before = structuredClone(seasonDemoRecommendations);
+    await assert.rejects(requestEketForecast('token', async () => { throw new Error('offline'); }));
+    assert.deepEqual(seasonDemoRecommendations, before);
+    assert.ok(seasonDemoRecommendations.length > 0);
   });
 });

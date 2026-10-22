@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   Play,
   Pause,
@@ -17,6 +17,7 @@ import { useApp } from '../context/useApp';
 import { useAuth } from '../context/useAuth';
 import { getScanPhoto } from '../data/photoStore';
 import { AssessmentRequestError, requestCropAssessment } from '../data/assessmentApi';
+import { simpleConfidence, simpleLikelihood } from '../data/assessmentLanguage';
 
 type AssessmentVariant = 'single' | 'multiple' | 'unidentified' | 'unclear' | 'offline';
 
@@ -62,11 +63,16 @@ const STEPS_UNIDENTIFIED = [
 ];
 
 export const CropAssessmentScreen: React.FC = () => {
+  const location = useLocation();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const { scans, resetScanDraft, applyAssessment, markScanFailed } = useApp();
   const { user } = useAuth();
+  const photoUploadError = typeof location.state === 'object' && location.state !== null
+    && 'photoUploadError' in location.state && typeof location.state.photoUploadError === 'string'
+    ? location.state.photoUploadError
+    : '';
 
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
   const [audioProgress, setAudioProgress] = useState<number>(38);
@@ -194,6 +200,19 @@ export const CropAssessmentScreen: React.FC = () => {
           onBack={() => navigate('/')}
         />
         <div className="px-4 flex flex-col gap-4">
+          {photoUploadError && (
+            <div role="alert" className="bg-[#2E2319] border border-[#B36A2D] rounded-2xl p-4">
+              <p className="text-xs text-[#D1D5DB] leading-relaxed">
+                The scan record was saved, but the photo could not be saved to your account. It remains on this device for now. {photoUploadError}
+              </p>
+              <button
+                onClick={() => navigate(`/scan/${scan.id}`)}
+                className="mt-3 text-xs font-semibold text-[#FFB36B] underline underline-offset-2"
+              >
+                Open Scan Details to retry
+              </button>
+            </div>
+          )}
           <div className={`${assessment?.status === 'completed' ? 'bg-[#1F2B25] border-[#176B45]' : 'bg-[#2E2319] border-[#B36A2D]'} border rounded-2xl p-5 flex flex-col gap-3`}>
             <h2 className="text-base font-bold text-white">
               {assessment ? (assessment.status === 'inconclusive' ? 'Assessment inconclusive' : 'Crop assessment')
@@ -207,7 +226,7 @@ export const CropAssessmentScreen: React.FC = () => {
               <p className="text-xs text-[#D1D5DB]">Your note: {scan.userObservations}</p>
             )}
             {assessment && <>
-              <p className="text-[11px] text-[#A1A7A3]">Crop identified: <span className="text-white">{assessment.cropIdentification}</span> · Qualitative confidence: <span className="text-white">{assessment.confidence}</span></p>
+              <p className="text-[11px] text-[#A1A7A3]">Crop: <span className="text-white">{assessment.cropIdentification}</span> · How sure: <span className="text-white">{simpleConfidence(assessment.confidence)}</span></p>
               <p className="text-[11px] text-[#A1A7A3]">{assessment.confidenceReason}</p>
               {!!assessment.observedSymptoms.length && <div>
                 <h3 className="text-xs font-bold text-white mb-1">Visible observations</h3>
@@ -216,7 +235,7 @@ export const CropAssessmentScreen: React.FC = () => {
               {!!assessment.possibleCauses.length && <div>
                 <h3 className="text-xs font-bold text-white mb-1">Possible causes to consider</h3>
                 <div className="flex flex-col gap-2">{assessment.possibleCauses.map((cause, index) => <div key={`${index}-${cause.name}`} className="bg-[#383B39] p-3 rounded-xl">
-                  <p className="text-xs font-bold text-white">{cause.name} <span className="text-[#FF8A32] font-medium">· {cause.likelihood.replace('_', ' ')}</span></p>
+                  <p className="text-xs font-bold text-white">{cause.name} <span className="text-[#FF8A32] font-medium">· {simpleLikelihood(cause.likelihood)}</span></p>
                   <p className="text-[11px] text-[#D1D5DB] mt-1 leading-relaxed">{cause.explanation}</p>
                 </div>)}</div>
               </div>}

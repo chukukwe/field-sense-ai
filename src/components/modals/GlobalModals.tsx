@@ -42,7 +42,7 @@ export const GlobalModals: React.FC = () => {
             <HelpCircle className="w-8 h-8" />
           </div>
           <h2 className="text-lg font-bold mb-2">FieldVoice AI Guidance</h2>
-          <div className="text-left text-xs text-[#D1D5DB] space-y-3 mb-6 max-h-[260px] overflow-y-auto pr-1">
+          <div className="text-left text-xs text-[#D1D5DB] space-y-3 mb-6">
             <div className="bg-[#292C2A] p-3 rounded-xl">
               <p className="font-semibold text-white mb-1">📸 Taking Clear Photos</p>
               <p>Hold your phone 20cm from the affected leaf. Shield harsh midday glare with your shadow to reveal leaf patterns clearly.</p>

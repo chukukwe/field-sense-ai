@@ -10,7 +10,6 @@ import {
   Sun,
   Check,
   Image as ImageIcon,
-  Sprout,
 } from 'lucide-react';
 import { TopHeader } from '../components/common/TopHeader';
 import { ScanImage } from '../components/common/ScanImage';
@@ -63,11 +62,6 @@ export const HomeScreen: React.FC = () => {
             }}
           />
           <div className="relative z-10">
-            {/* Hub pill */}
-            <span className="inline-block bg-[#234A38] text-white/90 text-xs px-3 py-1 rounded-full font-medium tracking-wide mb-3">
-              Eket Field Hub
-            </span>
-
             <h2 className="text-[22px] font-extrabold text-white leading-tight tracking-tight">
               Let's keep your crops<br />healthy.
             </h2>
@@ -85,7 +79,7 @@ export const HomeScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* ── SeasonSense AI replacement promo ── */}
+        {/* ── Seasonal crop recommendations promo ── */}
         <div className="overflow-hidden rounded-2xl border border-[#323633] bg-[#292C2A] shadow-sm">
           <div className="relative h-[178px] bg-[#181B19]">
             <img
@@ -94,20 +88,13 @@ export const HomeScreen: React.FC = () => {
               className="h-full w-full object-cover"
               loading="lazy"
             />
-            <span className="absolute left-3 top-3 rounded-full border border-white/20 bg-black/50 px-2.5 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
-              SeasonSense AI
-            </span>
           </div>
 
           <div className="p-4">
-            <div className="flex items-center gap-2">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1B4733] text-[#A7F3D0]"><Sprout className="h-5 w-5" /></span>
-              <p className="text-sm font-bold text-white">Your season-aware farming assistant</p>
-            </div>
             <h3 className="mt-4 max-w-[300px] text-lg font-bold leading-snug tracking-tight text-white">Plant at the right time. Prepare for the season.</h3>
-            <p className="mt-2 text-xs leading-relaxed text-[#D1D5DB]">Get source-based planting guidance and check upcoming weather conditions with SeasonSense AI.</p>
-            <button onClick={() => navigate('/season-sense')} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#176B45] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#1eb968] active:scale-[0.98] sm:w-auto">
-              Explore SeasonSense <ArrowRight className="h-4 w-4" />
+            <p className="mt-2 text-xs leading-relaxed text-[#D1D5DB]">Browse sample crop-planning windows by farming zone.</p>
+            <button onClick={() => navigate('/season-sense')} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#176B45] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#1eb968] active:scale-[0.98]">
+              See recommendations
             </button>
           </div>
         </div>
@@ -157,6 +144,7 @@ export const HomeScreen: React.FC = () => {
               <div className="flex items-center gap-3 mb-3">
                 <ScanImage
                   scan={item}
+                  fallbackIconOnly
                   alt={item.title}
                   className="w-12 h-12 rounded-xl object-cover bg-[#181B19] shrink-0"
                   loading="lazy"

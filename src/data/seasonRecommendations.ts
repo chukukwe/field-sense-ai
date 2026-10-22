@@ -1,4 +1,6 @@
-export type RecommendationCropId = 'cassava' | 'maize';
+import type { NigeriaFarmingZone } from './nigeriaRegions.js';
+
+export type RecommendationCropId = string;
 
 export interface RecommendationSource {
   title: string;
@@ -9,7 +11,7 @@ export interface RecommendationSource {
 export interface CropRecommendation {
   id: RecommendationCropId;
   name: string;
-  image: string;
+  image?: string;
   summary: string;
   why: string;
   plantingWindow: string;
@@ -43,11 +45,11 @@ const sources = {
   },
 } satisfies Record<string, RecommendationSource>;
 
-const recommendationDetails: Record<RecommendationCropId, CropRecommendation> = {
+const recommendationDetails: Record<'cassava' | 'maize', CropRecommendation> = {
   cassava: {
     id: 'cassava',
     name: 'Cassava',
-    image: '/assets/thumb-cassava.png',
+    image: '/assets/crop-cassava-clear.webp',
     summary: 'The source month range includes this part of the year for some two-rainy-season Nigerian zones.',
     why: 'IITA recommends planting at the beginning of a growing season so cuttings can sprout and establish with moisture. Its guide names April–May for the major season and August for the minor season in areas with two rainy seasons. This is a Nigerian guide, not an Eket-specific field assessment.',
     plantingWindow: 'April–May, or August in some two-rainy-season zones',
@@ -71,7 +73,7 @@ const recommendationDetails: Record<RecommendationCropId, CropRecommendation> = 
   maize: {
     id: 'maize',
     name: 'Maize',
-    image: '/assets/thumb-maize.png',
+    image: '/assets/crop-maize-clear.webp',
     summary: 'NAERLS gives humid-zone planting windows that include this part of the year.',
     why: 'NAERLS says to sow after rains are established, preferably just after a good rain. For the humid zone, its SAMMAZ 63 page lists late February–March and late July–August. NAERLS includes Akwa Ibom in its ecological-zone reference; the variety guidance still needs local confirmation.',
     plantingWindow: 'Late February–March, or late July–August (humid-zone guidance)',
@@ -130,6 +132,124 @@ export function getSeasonRecommendations(locationId: string, date: string): Reco
   if (isDateWithinRange(date, 2, 21, 3, 31) || isDateWithinRange(date, 7, 21, 8, 31)) recommendations.push(recommendationDetails.maize);
 
   return { status: 'ready', locationLabel: 'Eket, Akwa Ibom', date, recommendations };
+}
+
+/** Broad planning references for the southern belt; these are not field-specific recommendations. */
+export function getSouthernPlanningRecommendations(): CropRecommendation[] {
+  return [recommendationDetails.maize, recommendationDetails.cassava];
+}
+
+const demoCropCatalog: Record<string, { name: string; image?: string }> = {
+  maize: { name: 'Maize', image: '/assets/crop-maize-clear.webp' },
+  cassava: { name: 'Cassava', image: '/assets/crop-cassava-clear.webp' },
+  yam: { name: 'Yam', image: '/assets/crops/yam.jpg' },
+  rice: { name: 'Rice', image: '/assets/crops/rice.jpg' },
+  millet: { name: 'Millet', image: '/assets/crops/millet.jpg' },
+  sorghum: { name: 'Sorghum', image: '/assets/crops/sorghum.jpg' },
+  cowpea: { name: 'Cowpea', image: '/assets/crops/cowpea.jpg' },
+  groundnut: { name: 'Groundnut', image: '/assets/crops/groundnut.jpg' },
+  soybean: { name: 'Soybean', image: '/assets/crops/soybean.jpg' },
+  tomato: { name: 'Tomato', image: '/assets/crops/tomato.jpg' },
+  onion: { name: 'Onion', image: '/assets/crops/onion.jpg' },
+  pepper: { name: 'Pepper', image: '/assets/crops/pepper.jpg' },
+  plantain: { name: 'Plantain', image: '/assets/crops/plantain.jpg' },
+  cocoyam: { name: 'Cocoyam', image: '/assets/crops/cocoyam.jpg' },
+  okra: { name: 'Okra', image: '/assets/crops/okra.jpg' },
+  leafyVegetables: { name: 'Leafy vegetables', image: '/assets/crops/leafy-vegetables.jpg' },
+  wheat: { name: 'Wheat', image: '/assets/crops/wheat.jpg' },
+  sesame: { name: 'Sesame', image: '/assets/crops/sesame.jpg' },
+  potato: { name: 'Potato', image: '/assets/crops/potato.jpg' },
+} satisfies Record<string, { name: string; image?: string }>;
+
+export function getCropPreviewImage(cropName: string): string | undefined {
+  const normalized = cropName.trim().toLocaleLowerCase();
+  const crop = Object.values(demoCropCatalog).find(({ name }) => name.toLocaleLowerCase() === normalized)
+    ?? (normalized === 'irish potato' ? demoCropCatalog.potato : undefined);
+  return crop?.image;
+}
+
+type DemoCropId = keyof typeof demoCropCatalog;
+
+interface ZoneCropSet {
+  rainyMonths: readonly number[];
+  rainy: readonly DemoCropId[];
+  dry: readonly DemoCropId[];
+}
+
+// This preview data is intentionally marked as a sample. It is a zone-filtering demo,
+// not an authoritative planting calendar or field-specific recommendation.
+const sampleZoneCropSets: Record<NigeriaFarmingZone, ZoneCropSet> = {
+  'Sahel Savanna': {
+    rainyMonths: [5, 6, 7, 8, 9],
+    rainy: ['millet', 'sorghum', 'cowpea', 'maize', 'groundnut', 'rice', 'sesame'],
+    dry: ['tomato', 'onion', 'pepper', 'wheat'],
+  },
+  'Sudan Savanna': {
+    rainyMonths: [5, 6, 7, 8, 9, 10],
+    rainy: ['millet', 'sorghum', 'maize', 'cowpea', 'groundnut', 'soybean', 'rice', 'sesame'],
+    dry: ['tomato', 'onion', 'pepper', 'wheat'],
+  },
+  'Northern Guinea Savanna': {
+    rainyMonths: [4, 5, 6, 7, 8, 9, 10],
+    rainy: ['maize', 'rice', 'soybean', 'cowpea', 'groundnut', 'sorghum', 'sesame'],
+    dry: ['tomato', 'onion', 'pepper', 'leafyVegetables'],
+  },
+  'Southern Guinea Savanna': {
+    rainyMonths: [4, 5, 6, 7, 8, 9, 10],
+    rainy: ['maize', 'yam', 'cassava', 'rice', 'soybean', 'cowpea', 'groundnut'],
+    dry: ['tomato', 'pepper', 'leafyVegetables', 'onion'],
+  },
+  'Derived Savanna': {
+    rainyMonths: [3, 4, 5, 6, 7, 8, 9, 10],
+    rainy: ['maize', 'cassava', 'yam', 'rice', 'soybean', 'cowpea', 'groundnut', 'plantain'],
+    dry: ['tomato', 'pepper', 'okra', 'leafyVegetables', 'onion'],
+  },
+  'Humid Forest': {
+    rainyMonths: [3, 4, 5, 6, 7, 8, 9, 10, 11],
+    rainy: ['cassava', 'yam', 'plantain', 'maize', 'rice', 'cocoyam', 'okra', 'pepper', 'soybean'],
+    dry: ['tomato', 'pepper', 'okra', 'leafyVegetables', 'onion'],
+  },
+  'Mid Altitude': {
+    rainyMonths: [4, 5, 6, 7, 8, 9, 10],
+    rainy: ['maize', 'rice', 'soybean', 'cowpea', 'groundnut', 'potato'],
+    dry: ['tomato', 'pepper', 'leafyVegetables', 'wheat', 'potato'],
+  },
+};
+
+export function getZoneSampleSeason(zone: NigeriaFarmingZone, date: string): 'rainy-season sample' | 'dry-season sample' {
+  const month = Number(date.slice(5, 7));
+  return sampleZoneCropSets[zone].rainyMonths.includes(month) ? 'rainy-season sample' : 'dry-season sample';
+}
+
+export function getZoneDemoRecommendations(zone: NigeriaFarmingZone, date: string): CropRecommendation[] {
+  const season = getZoneSampleSeason(zone, date);
+  const cropIds = season === 'rainy-season sample' ? sampleZoneCropSets[zone].rainy : sampleZoneCropSets[zone].dry;
+  return cropIds.map((id) => {
+    const crop = demoCropCatalog[id]!;
+    return {
+      id,
+      name: crop.name,
+      ...(crop.image ? { image: crop.image } : {}),
+      summary: 'Sample crop included for this farming zone.',
+      why: `${crop.name} is included in the ${zone} ${season}. This sample list is for preview only and is not verified planting advice.`,
+      plantingWindow: season === 'rainy-season sample' ? 'Rainy-season sample list' : 'Dry-season sample list',
+      windowNote: 'The app has not yet checked a trusted local crop calendar for your exact area. Confirm planting dates, water needs, variety, soil and field history with an extension worker.',
+      considerations: [
+        'This crop appears in sample data only; it is not selected from a farm-specific assessment.',
+        'Rainfall timing and soil conditions can change within the same farming zone.',
+        'Dry-season production may depend on an irrigation supply; this sample does not check water access.',
+      ],
+      guidance: ['Use this card to preview the zone and season filter. Ask a local extension worker for planting decisions.'],
+      risks: ['Sample data only. Do not use this card as a planting recommendation or crop-rotation plan.'],
+      sources: [],
+    };
+  });
+}
+
+const southernPlanningAliases = new Set(['southern nigeria', 'south nigeria', 'southern region nigeria']);
+
+export function isSouthernPlanningRegion(value: string): boolean {
+  return southernPlanningAliases.has(normalizeLocation(value));
 }
 
 export const seasonSenseSources = {

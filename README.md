@@ -60,13 +60,23 @@ The API requires `SUPABASE_URL`, either `SUPABASE_SECRET_KEY` or the legacy `SUP
 
 SeasonSense is available to signed-in users at `/season-sense` and from the existing hamburger menu. The home promotion links there; the existing crop scan remains available from the Home screen's **Scan a Crop** action.
 
-The first supported recommendation and forecast profile is Eket, Akwa Ibom. The location field matches the place name to that configured profile; it does not geocode or verify a farmer's exact location. Other locations are reported as unsupported. The authenticated Render route `GET /api/season/weather?location=eket` proxies Open-Meteo with fixed Eket coordinates verified through GeoNames. The upstream request asks for up to seven days; the UI displays the actual returned date coverage and values rather than assuming seven days arrived. Weather is optional context and does not select crops. The backend caches the response for 15 minutes, rate-limits each verified Firebase UID, and returns an explicit unavailable response rather than invented weather values.
+SeasonSense uses the selected state and LGA to show crop-calendar entries for its mapped farming zone. Calendar entries are marked as draft until verified. A separate NiMet panel adds seasonal rainfall context when an exact state/LGA/year record is available; weather data does not choose crops. The older authenticated Open-Meteo forecast endpoint remains separate from this screen.
 
-Crop recommendations use deterministic, source-linked month windows: IITA's Nigeria cassava guide (April–May and, in some two-rainy-season zones, August) and NAERLS's humid-zone SAMMAZ 63 guidance (late February–March and late July–August). These are potential matches that still require local rain, soil, variety and extension checks. Okra is not recommended automatically because the available NAERLS record only says wet-season planting and this app has no verified current Eket field conditions. The IITA yam document is a regeneration guide rather than an Eket-specific production calendar, so it is not used to recommend yam. NiMet's August–October 2026 update is shown as limited broad climate context and is not used to select crops. SeasonSense does not ask Gemini to generate agricultural recommendations.
+SeasonSense does not use Gemini to generate crop recommendations. NiMet errors or missing records do not hide otherwise available crop-calendar entries.
 
 Legacy SeasonSense farm-plan records, if present, are not read, migrated, overwritten, or deleted by the current recommendation feature. No current app workflow uses or exposes those records.
 
 The forecast and guidance tests use mocked Open-Meteo responses. The in-memory per-user weather limiter is per server process; if the Render service runs multiple instances, use a shared store or confirm the per-instance limit is sufficient. The route does not trust arbitrary forwarded IP headers or configure Express proxy trust. Live forecast availability, Firestore Emulator authorization, and deployed rules require manual verification. Review and test the rules in the Firebase Emulator before deployment.
+
+### NiMet seasonal rainfall data
+
+SeasonSense can request NiMet seasonal rainfall predictions for the selected state, LGA, and year. The response adds context only; it does not select crops or replace the crop calendar. The backend uses NiMet's documented `GET /srp` route with `state`, `lga_name`, and `year`, then keeps only exact normalized state/LGA/year matches. Supported fields are onset, cessation, length of season, and annual rainfall. Missing fields stay blank, and the app does not add units that NiMet's published example does not specify. A missing NiMet record or failed request does not hide crop calendar entries.
+
+The backend reads the secret from `NIMET_API_KEY` and sends it in the `x-api-key` header. Never put this key in the frontend or a `VITE_*` variable.
+
+For local development, copy `server/.env.example` to `server/.env`, add your value after `NIMET_API_KEY=`, and restart the backend. `server/.env` is ignored by Git.
+
+For production, open the FieldVoice backend service in the [Render Dashboard](https://dashboard.render.com/), select **Environment**, add `NIMET_API_KEY` under **Environment Variables**, and save. Do not add this key to Netlify. Render applies saved environment variables on the next deploy or restart; the key is not changed by this repository update.
 
 ### Checks
 
