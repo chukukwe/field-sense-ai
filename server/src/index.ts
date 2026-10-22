@@ -4,12 +4,18 @@ import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { createApp, ProviderError } from './app.js';
 import { assessWithGemini } from './gemini.js';
+import { createSupabasePhotoStore } from './supabasePhotoStore.js';
 
 const port = Number(process.env.PORT || 8787);
 const maxImageMb = Number(process.env.MAX_IMAGE_MB || 8);
 const projectId = process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT;
 const apiKey = process.env.GEMINI_API_KEY;
 const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseApiKey = supabaseSecretKey || supabaseServiceKey;
+const supabaseBucket = process.env.SUPABASE_PHOTO_BUCKET || 'crop-photos';
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173')
   .split(',')
   .map((origin) => origin.trim())
@@ -22,9 +28,27 @@ if (getApps().length === 0) initializeApp({ credential: applicationDefault(), pr
 
 const auth = getAuth();
 const db = getFirestore();
+const photoStore = supabaseUrl && supabaseApiKey
+  ? {
+      ...createSupabasePhotoStore({ url: supabaseUrl, apiKey: supabaseApiKey, legacyServiceRoleKey: !supabaseSecretKey, bucket: supabaseBucket }),
+      getPhotoRecord: async (uid: string, scanId: string) => {
+        const snapshot = await db.doc(`users/${uid}/scans/${scanId}`).get();
+        return snapshot.exists ? {
+          cloudPhotoPath: typeof snapshot.data()?.cloudPhotoPath === 'string' ? snapshot.data()?.cloudPhotoPath as string : undefined,
+        } : null;
+      },
+      savePhotoReference: async (uid: string, scanId: string, path: string) => {
+        await db.doc(`users/${uid}/scans/${scanId}`).update({ cloudPhotoPath: path, photoScope: 'cloud', updatedAt: FieldValue.serverTimestamp() });
+      },
+      clearPhotoReference: async (uid: string, scanId: string) => {
+        await db.doc(`users/${uid}/scans/${scanId}`).update({ cloudPhotoPath: FieldValue.delete(), photoScope: 'local-only', updatedAt: FieldValue.serverTimestamp() });
+      },
+    }
+  : undefined;
 const app = createApp({
   allowedOrigins,
   maxImageBytes: maxImageMb * 1024 * 1024,
+  photoStore,
   verifyIdToken: async (token) => auth.verifyIdToken(token, true),
   claimScan: async (uid, scanId, cropType) => {
     const ref = db.doc(`users/${uid}/scans/${scanId}`);

@@ -186,7 +186,7 @@ export const ProfileScreen: React.FC = () => {
           >
             <div className="flex items-center gap-2.5">
               <Sliders className="w-4 h-4 text-[#FF8A32]" />
-              <span>App & Voice Preferences</span>
+              <span>Settings & App Preferences</span>
             </div>
             <span className="text-[#8F9490] text-sm">&rarr;</span>
           </button>

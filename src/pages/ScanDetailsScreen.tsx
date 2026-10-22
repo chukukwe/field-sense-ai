@@ -1,16 +1,23 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Camera, Clock, Trash2, Image as ImageIcon } from 'lucide-react';
 import { TopHeader } from '../components/common/TopHeader';
 import { ScanImage } from '../components/common/ScanImage';
 import { useApp } from '../context/useApp';
+import { useAuth } from '../context/useAuth';
+import { CropPhotoRequestError, uploadLocalScanPhoto, getCloudCropPhoto } from '../data/photoApi';
 
 export const ScanDetailsScreen: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { scans, deleteScan, setActiveModal } = useApp();
+  const { user } = useAuth();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoMessage, setPhotoMessage] = useState('');
+  const [photoReload, setPhotoReload] = useState(0);
+  const photoInput = useRef<HTMLInputElement>(null);
 
   const scan = scans.find((item) => item.id === id);
   const diagnosis = scan?.diagnosis;
@@ -26,6 +33,42 @@ export const ScanDetailsScreen: React.FC = () => {
     } else {
       setActiveModal('delete-failed');
     }
+  };
+
+  const uploadExistingPhoto = async (replacement?: File) => {
+    if (!scan || !user) {
+      setPhotoMessage('Sign in again before saving this photo.');
+      return;
+    }
+    setPhotoBusy(true);
+    setPhotoMessage('');
+    try {
+      if (!replacement && !scan.photoStorageKey) {
+        photoInput.current?.click();
+        setPhotoMessage('The original photo is not saved on this device. Choose the original file to restore it.');
+        return;
+      }
+      await uploadLocalScanPhoto({ scanId: scan.id, photoStorageKey: scan.photoStorageKey ?? scan.id, idToken: await user.getIdToken(), replacement });
+      setPhotoMessage('Photo saved to your account. It will be available on your other signed-in devices.');
+      setPhotoReload((value) => value + 1);
+    } catch (error) {
+      if (error instanceof CropPhotoRequestError && error.code === 'LEGACY_PHOTO_MISSING') photoInput.current?.click();
+      setPhotoMessage(error instanceof Error ? `${error.message} Your local photo is still kept; retry when ready.` : 'Photo upload failed. Your local photo is still kept; retry when ready.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const retryPhotoLoad = async () => {
+    if (!scan?.cloudPhotoPath || !user) return;
+    setPhotoBusy(true);
+    setPhotoMessage('');
+    try {
+      await getCloudCropPhoto({ scanId: scan.id, idToken: await user.getIdToken() });
+      setPhotoReload((value) => value + 1);
+    } catch (error) {
+      setPhotoMessage(error instanceof Error ? error.message : 'The saved photo could not be loaded. Retry your connection or upload it again.');
+    } finally { setPhotoBusy(false); }
   };
 
   if (!scan) {
@@ -61,6 +104,7 @@ export const ScanDetailsScreen: React.FC = () => {
         {/* ── Hero Photo ── */}
         <div className="relative aspect-square rounded-2xl overflow-hidden bg-[#181B19] border border-[#323633]">
           <ScanImage
+            key={`${scan.id}-${scan.cloudPhotoPath ?? 'local'}-${photoReload}`}
             scan={scan}
             alt={scan.title}
             className="w-full h-full object-cover"
@@ -69,6 +113,29 @@ export const ScanDetailsScreen: React.FC = () => {
             <ImageIcon className="w-3.5 h-3.5 shrink-0" />
             {scan.cropType} • Scanned {scan.date}
           </span>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => {
+            const selected = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (selected) void uploadExistingPhoto(selected);
+          }} />
+          {scan.cloudPhotoPath ? (
+            <>
+              <button disabled={photoBusy} onClick={() => void retryPhotoLoad()} className="self-start text-xs font-semibold text-[#1EB968] disabled:opacity-50">
+                {photoBusy ? 'Loading photo…' : 'Retry loading photo'}
+              </button>
+              <button disabled={photoBusy} onClick={() => void uploadExistingPhoto()} className="self-start text-xs font-semibold text-[#1EB968] disabled:opacity-50">Retry photo upload</button>
+            </>
+          ) : (
+            <button disabled={photoBusy} onClick={() => void uploadExistingPhoto()} className="self-start text-xs font-semibold text-[#1EB968] disabled:opacity-50">
+              {photoBusy ? 'Saving photo…' : 'Save photo to your account'}
+            </button>
+          )}
+          <button disabled={photoBusy} onClick={() => photoInput.current?.click()} className="self-start text-xs text-[#D1D5DB] disabled:opacity-50">Choose original photo</button>
+          {photoMessage && <p role="status" className="text-[11px] text-[#D1D5DB] leading-relaxed">{photoMessage}</p>}
+          {!scan.cloudPhotoPath && scan.photoScope === 'local-only' && <p className="text-[11px] text-[#8F9490]">This photo is currently stored on this device. Upload it so it can be viewed after login on another device.</p>}
         </div>
 
         {/* ── What Was Found ── */}

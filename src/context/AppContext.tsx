@@ -7,6 +7,7 @@ import type { ScanDraft } from './AppContextStore';
 import { useAuth } from './useAuth';
 import { deleteScanPhoto, getScanPhoto, saveScanPhoto } from '../data/photoStore';
 import { firebaseAuth, firestore } from '../lib/firebase';
+import { CropPhotoRequestError, deleteCloudCropPhoto, getCloudCropPhoto } from '../data/photoApi';
 
 const initialDraft: ScanDraft = {
   photoFile: null,
@@ -175,20 +176,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteScan = useCallback(async (id: string): Promise<boolean> => {
     const scan = scans.find((item) => item.id === id);
     if (!scan) return false;
-    // Legacy cloud-photo records cannot be fully deleted while Cloud Storage is
-    // unavailable. Keep the metadata intact rather than claiming full success.
-    if (scan.cloudPhotoPath) return false;
-
     let localPhoto: Blob | undefined;
-    try {
-      if (scan.photoStorageKey) {
-        localPhoto = await getScanPhoto(scan.photoStorageKey);
-        await deleteScanPhoto(scan.photoStorageKey);
+    try { if (scan.photoStorageKey) localPhoto = await getScanPhoto(scan.photoStorageKey); }
+    catch { return false; }
+    if (scan.cloudPhotoPath) {
+      if (!user) return false;
+      if (!localPhoto) {
+        try { localPhoto = await getCloudCropPhoto({ scanId: scan.id, idToken: await user.getIdToken() }); }
+        catch (error) {
+          // A missing cloud object has nothing left to preserve. Other retrieval
+          // failures stop deletion before any remote data is removed.
+          if (!(error instanceof CropPhotoRequestError) || error.code !== 'PHOTO_NOT_FOUND') return false;
+        }
       }
+      try { await deleteCloudCropPhoto({ scanId: scan.id, idToken: await user.getIdToken() }); }
+      catch { return false; }
+    }
+
+    try {
       if (scan.dataScope !== 'local-only') {
         if (!firestore || !uid) throw new Error('Firebase is unavailable.');
         await deleteDoc(doc(firestore, 'users', uid, 'scans', id));
       }
+      if (scan.photoStorageKey) await deleteScanPhoto(scan.photoStorageKey).catch(() => undefined);
       setScans((prev) => prev.filter((s) => s.id !== id));
       return true;
     } catch {
@@ -196,10 +206,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // the photo when possible so the still-existing scan remains viewable.
       if (scan.photoStorageKey && localPhoto) {
         try { await saveScanPhoto(scan.photoStorageKey, localPhoto); } catch { /* report failure either way */ }
+      } else if (scan.cloudPhotoPath && localPhoto) {
+        const restoreKey = `${uid}/${scan.id}`;
+        try {
+          await saveScanPhoto(restoreKey, localPhoto);
+          if (firestore && uid) await updateDoc(doc(firestore, 'users', uid, 'scans', id), {
+            photoStorageKey: restoreKey,
+            photoScope: 'local-only',
+            updatedAt: serverTimestamp(),
+          });
+          setScans((previous) => previous.map((item) => item.id === id ? { ...item, photoStorageKey: restoreKey, cloudPhotoPath: undefined, photoScope: 'local-only' } : item));
+        } catch { /* keep the operation reported as failed */ }
       }
       return false;
     }
-  }, [scans, uid]);
+  }, [scans, uid, user]);
 
   const clearCache = () => {
     setCachedStorageMb(0.8);
@@ -256,14 +277,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       footerStatus: 'Analysing…',
       footerActionLabel: 'View Assessment',
       imageUrl: previewUrl,
-      photoStorageKey: scanDraft.photoFile ? id : undefined,
+      photoStorageKey: scanDraft.photoFile ? `${uid}/${id}` : undefined,
       assessmentStatus: 'pending',
       imageSizeMb: scanDraft.photoSizeMb || undefined,
       userObservations: scanDraft.observations || undefined,
     };
 
     return newScan;
-  }, [scanDraft]);
+  }, [scanDraft, uid]);
 
   return (
     <AppContext.Provider

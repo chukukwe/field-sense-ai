@@ -6,6 +6,7 @@ import { useApp } from '../context/useApp';
 import { getScanPhoto, saveScanPhoto } from '../data/photoStore';
 import { requestCropAssessment } from '../data/assessmentApi';
 import { useAuth } from '../context/useAuth';
+import { uploadCropPhoto } from '../data/photoApi';
 
 const SCANNING_STEPS = [
   'Preparing your photo…',
@@ -90,8 +91,9 @@ export const ScanningScreen: React.FC = () => {
       } else if (!scanDraft.cropType) {
         await markScanFailed(scan.id, 'Choose a crop type before requesting an assessment.');
       } else {
+        let localPhoto: Blob | undefined;
         try {
-          const localPhoto = await getScanPhoto(scan.photoStorageKey);
+          localPhoto = await getScanPhoto(scan.photoStorageKey);
           if (!localPhoto) throw new Error('The saved photo could not be read from this device.');
           if (!user) throw new Error('Sign in again before requesting an assessment.');
           const assessment = await requestCropAssessment({
@@ -104,6 +106,12 @@ export const ScanningScreen: React.FC = () => {
           applyAssessment(scan.id, assessment, assessment.status, assessment.summary);
         } catch (error) {
           await markScanFailed(scan.id, error instanceof Error ? error.message : 'The assessment could not be completed. You can retry this scan.');
+        }
+        // The API returns success only after the private object is uploaded and
+        // the Firestore reference has been updated. Keep IndexedDB as fallback.
+        if (localPhoto && user) {
+          try { await uploadCropPhoto({ scanId: scan.id, image: localPhoto, idToken: await user.getIdToken() }); }
+          catch { /* Scan Details offers a retry/migration action; local data stays intact. */ }
         }
       }
       navigate(`/assessment/${scan.id}`);

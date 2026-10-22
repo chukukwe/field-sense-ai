@@ -89,8 +89,8 @@ export const HomeScreen: React.FC = () => {
           {/* Photo banner */}
           <div className="relative h-[178px] bg-[#181B19]">
             <img
-              src="/assets/feature-banner.png"
-              alt="Field crop diagnostic"
+              src="/assets/leaf-observation.png"
+              alt="A farmer inspecting leaves in a crop field"
               className="w-full h-full object-cover"
               loading="lazy"
             />
