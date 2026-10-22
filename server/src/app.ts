@@ -7,6 +7,7 @@ import { fileTypeFromBuffer } from 'file-type';
 import sharp from 'sharp';
 import { z } from 'zod';
 import { assessmentSchema, cropTypes, type CropAssessmentResult } from './assessmentSchema.js';
+import type { WeatherForecast } from './weather.js';
 
 const scanIdSchema = z.string().regex(/^scan-[a-zA-Z0-9-]{1,80}$/);
 const cropSchema = z.enum(cropTypes);
@@ -20,8 +21,10 @@ export interface AnalyzeDependencies {
   assessImage: (image: Buffer, mimeType: string, cropType: string, observations: string) => Promise<unknown>;
   allowedOrigins: string[];
   limiterMax?: number;
+  weatherLimiterMax?: number;
   maxImageBytes?: number;
   photoStore?: PhotoStoreDependencies;
+  getWeatherForecast?: () => Promise<WeatherForecast>;
 }
 
 export interface PhotoRecord {
@@ -70,6 +73,32 @@ export function createApp(deps: AnalyzeDependencies) {
     allowedHeaders: ['Authorization', 'Content-Type'],
   }));
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+  const weatherAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    void authenticatedUid(req, deps).then((uid) => {
+      if (!uid) return sendError(res, 401, 'AUTH_REQUIRED', 'Sign in again to view the local forecast.');
+      (req as express.Request & { weatherUid?: string }).weatherUid = uid;
+      next();
+    }).catch(() => sendError(res, 401, 'AUTH_INVALID', 'Your sign-in has expired. Sign in again to continue.'));
+  };
+  const weatherLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: deps.weatherLimiterMax ?? 30,
+    keyGenerator: (req) => (req as express.Request & { weatherUid?: string }).weatherUid ?? 'unverified',
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  });
+  app.get('/api/season/weather', weatherAuth, weatherLimiter, (req, res) => {
+    void (async () => {
+      if (req.query.location !== 'eket') return sendError(res, 400, 'LOCATION_UNSUPPORTED', 'Weather is currently available for Eket, Akwa Ibom only.');
+      if (!deps.getWeatherForecast) return sendError(res, 503, 'WEATHER_UNAVAILABLE', 'The weather forecast is temporarily unavailable. Try again later.', true);
+      try {
+        const forecast = await deps.getWeatherForecast();
+        res.setHeader('Cache-Control', 'private, no-store');
+        return res.json(forecast);
+      }
+      catch { return sendError(res, 503, 'WEATHER_UNAVAILABLE', 'The weather forecast is temporarily unavailable. Try again later.', true); }
+    })().catch(() => sendError(res, 503, 'WEATHER_UNAVAILABLE', 'The weather forecast is temporarily unavailable. Try again later.', true));
+  });
   const photoStore = deps.photoStore;
   if (photoStore) {
     const photoLimiter = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false });

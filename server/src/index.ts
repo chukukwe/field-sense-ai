@@ -5,6 +5,7 @@ import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { createApp, ProviderError } from './app.js';
 import { assessWithGemini } from './gemini.js';
 import { createSupabasePhotoStore } from './supabasePhotoStore.js';
+import { getEketForecast } from './weather.js';
 
 const port = Number(process.env.PORT || 8787);
 const maxImageMb = Number(process.env.MAX_IMAGE_MB || 8);
@@ -49,6 +50,17 @@ const app = createApp({
   allowedOrigins,
   maxImageBytes: maxImageMb * 1024 * 1024,
   photoStore,
+  getWeatherForecast: (() => {
+    let cached: Awaited<ReturnType<typeof getEketForecast>> | undefined;
+    let cachedAt = 0;
+    return async () => {
+      if (cached && Date.now() - cachedAt < 15 * 60 * 1000) return cached;
+      const next = await getEketForecast();
+      cached = next;
+      cachedAt = Date.now();
+      return next;
+    };
+  })(),
   verifyIdToken: async (token) => auth.verifyIdToken(token, true),
   claimScan: async (uid, scanId, cropType) => {
     const ref = db.doc(`users/${uid}/scans/${scanId}`);

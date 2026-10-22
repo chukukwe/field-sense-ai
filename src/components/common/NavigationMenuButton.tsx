@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Menu, X } from 'lucide-react';
+import { Menu, Sprout, X } from 'lucide-react';
 
 const navigationItems = [
   { label: 'Home', path: '/' },
   { label: 'Scan a crop', path: '/scan' },
   { label: 'Scan history', path: '/history' },
+  { label: 'SeasonSense AI', path: '/season-sense', icon: Sprout },
   { label: 'Profile', path: '/profile' },
 ];
 
@@ -65,7 +66,7 @@ export const NavigationMenuButton: React.FC<{ compact?: boolean }> = ({ compact 
                 }}
                 className={`w-full rounded-xl px-3 py-2.5 text-left text-sm transition ${active ? 'bg-[#174D38] font-semibold text-white' : 'text-[#D1D5DB] hover:bg-[#383B39] hover:text-white'}`}
               >
-                {item.label}
+                <span className="flex items-center gap-2">{item.path === '/season-sense' && <Sprout className="h-4 w-4 text-[#22C55E]" aria-hidden="true" />}{item.label}</span>
               </button>
             );
           })}

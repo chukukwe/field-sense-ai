@@ -1,4 +1,4 @@
-# React + TypeScript + Vite
+# FieldVoice AI
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
@@ -31,7 +31,7 @@ If you are developing a production application, we recommend enabling type-aware
 
 See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
 
-## Gemini crop assessment API
+## Existing crop assessment and photo API
 
 The existing app keeps Firebase Authentication and Firestore for account-owned scan records, and uses the Node.js API for protected Gemini analysis and private photo storage. The API verifies Firebase ID tokens and checks the scan under `users/{uid}/scans/{scanId}` before analysis or photo operations. Original images stay in IndexedDB as a local fallback and are also saved to a private Supabase Storage bucket so the same signed-in account can view them on another device. The browser never receives the Supabase service-role credential.
 
@@ -55,6 +55,18 @@ The existing app keeps Firebase Authentication and Firestore for account-owned s
 The API requires `SUPABASE_URL`, either `SUPABASE_SECRET_KEY` or the legacy `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_PHOTO_BUCKET` for photo storage. Until configured, photo endpoints return a clear configuration error and local copies remain available. `SUPABASE_PHOTO_BUCKET` defaults to `crop-photos`.
 
 `VITE_API_BASE_URL` in the root frontend environment is optional. Leave it empty for the same-origin `/api` path and local Vite proxy. Set it to the deployed API base URL only for production frontend builds. It is not secret.
+
+## SeasonSense AI
+
+SeasonSense is available to signed-in users at `/season-sense` and from the existing hamburger menu. The home promotion links there; the existing crop scan remains available from the Home screen's **Scan a Crop** action.
+
+The first supported recommendation and forecast profile is Eket, Akwa Ibom. The location field matches the place name to that configured profile; it does not geocode or verify a farmer's exact location. Other locations are reported as unsupported. The authenticated Render route `GET /api/season/weather?location=eket` proxies Open-Meteo with fixed Eket coordinates verified through GeoNames. The upstream request asks for up to seven days; the UI displays the actual returned date coverage and values rather than assuming seven days arrived. Weather is optional context and does not select crops. The backend caches the response for 15 minutes, rate-limits each verified Firebase UID, and returns an explicit unavailable response rather than invented weather values.
+
+Crop recommendations use deterministic, source-linked month windows: IITA's Nigeria cassava guide (April–May and, in some two-rainy-season zones, August) and NAERLS's humid-zone SAMMAZ 63 guidance (late February–March and late July–August). These are potential matches that still require local rain, soil, variety and extension checks. Okra is not recommended automatically because the available NAERLS record only says wet-season planting and this app has no verified current Eket field conditions. The IITA yam document is a regeneration guide rather than an Eket-specific production calendar, so it is not used to recommend yam. NiMet's August–October 2026 update is shown as limited broad climate context and is not used to select crops. SeasonSense does not ask Gemini to generate agricultural recommendations.
+
+Legacy SeasonSense farm-plan records, if present, are not read, migrated, overwritten, or deleted by the current recommendation feature. No current app workflow uses or exposes those records.
+
+The forecast and guidance tests use mocked Open-Meteo responses. The in-memory per-user weather limiter is per server process; if the Render service runs multiple instances, use a shared store or confirm the per-instance limit is sufficient. The route does not trust arbitrary forwarded IP headers or configure Express proxy trust. Live forecast availability, Firestore Emulator authorization, and deployed rules require manual verification. Review and test the rules in the Firebase Emulator before deployment.
 
 ### Checks
 

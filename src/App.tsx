@@ -12,6 +12,7 @@ import { ScanDetailsScreen } from './pages/ScanDetailsScreen';
 import { HistoryScreen } from './pages/HistoryScreen';
 import { SettingsScreen } from './pages/SettingsScreen';
 import { ProfileScreen } from './pages/ProfileScreen';
+import { SeasonSenseScreen } from './pages/SeasonSenseScreen';
 import { requireEmailVerification } from './lib/firebase';
 
 function ProtectedRoutes() {
@@ -42,6 +43,7 @@ export function App() {
               <Route path="/history" element={<HistoryScreen />} />
               <Route path="/settings" element={<SettingsScreen />} />
               <Route path="/profile" element={<ProfileScreen />} />
+              <Route path="/season-sense" element={<SeasonSenseScreen />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

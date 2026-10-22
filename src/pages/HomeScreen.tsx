@@ -10,6 +10,7 @@ import {
   Sun,
   Check,
   Image as ImageIcon,
+  Sprout,
 } from 'lucide-react';
 import { TopHeader } from '../components/common/TopHeader';
 import { ScanImage } from '../components/common/ScanImage';
@@ -84,34 +85,29 @@ export const HomeScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Feature Promo Card ("Field Diagnostic") ── */}
-        <div className="bg-[#292C2A] rounded-2xl overflow-hidden border border-[#323633] shadow-sm">
-          {/* Photo banner */}
+        {/* ── SeasonSense AI replacement promo ── */}
+        <div className="overflow-hidden rounded-2xl border border-[#323633] bg-[#292C2A] shadow-sm">
           <div className="relative h-[178px] bg-[#181B19]">
             <img
               src="/assets/leaf-observation.png"
               alt="A farmer inspecting leaves in a crop field"
-              className="w-full h-full object-cover"
+              className="h-full w-full object-cover"
               loading="lazy"
             />
-            <span className="absolute top-3 left-3 bg-black/50 backdrop-blur-sm text-white text-xs px-2.5 py-0.5 rounded-full font-medium border border-white/20">
-              Field Diagnostic
+            <span className="absolute left-3 top-3 rounded-full border border-white/20 bg-black/50 px-2.5 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
+              SeasonSense AI
             </span>
           </div>
 
-          {/* Text + CTA */}
           <div className="p-4">
-            <h3 className="text-sm font-bold text-white leading-snug tracking-tight">
-              Noticed something unusual on a leaf?
-            </h3>
-            <p className="text-xs text-[#D1D5DB] mt-1.5 leading-relaxed">
-              Take a photo and let AI help you investigate. We'll identify signs of pests, blight, or nutrient shortages right away.
-            </p>
-            <button
-              onClick={() => navigate('/scan')}
-              className="mt-3.5 w-full bg-[#27332D] hover:bg-[#2E3C34] active:scale-[0.98] transition text-white text-xs font-semibold py-3 rounded-xl text-center cursor-pointer"
-            >
-              Start a Scan
+            <div className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1B4733] text-[#A7F3D0]"><Sprout className="h-5 w-5" /></span>
+              <p className="text-sm font-bold text-white">Your season-aware farming assistant</p>
+            </div>
+            <h3 className="mt-4 max-w-[300px] text-lg font-bold leading-snug tracking-tight text-white">Plant at the right time. Prepare for the season.</h3>
+            <p className="mt-2 text-xs leading-relaxed text-[#D1D5DB]">Get source-based planting guidance and check upcoming weather conditions with SeasonSense AI.</p>
+            <button onClick={() => navigate('/season-sense')} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#176B45] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#1eb968] active:scale-[0.98] sm:w-auto">
+              Explore SeasonSense <ArrowRight className="h-4 w-4" />
             </button>
           </div>
         </div>
