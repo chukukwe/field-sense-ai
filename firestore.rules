@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedInAs(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function validProfile(data) {
+      return data.keys().hasOnly([
+        'fullName', 'email', 'role', 'location', 'preferredLanguage',
+        'accentGuidance', 'createdAt', 'updatedAt'
+      ])
+      && data.fullName is string
+      && data.fullName.size() >= 2
+      && data.email is string
+      && data.location is string
+      && data.preferredLanguage is string
+      && data.accentGuidance is bool;
+    }
+
+    function validScan(data) {
+      return data.keys().hasOnly([
+        'title', 'cropType', 'date', 'status', 'statusVariant', 'summary',
+        'footerIcon', 'footerStatus', 'footerActionLabel', 'imageUrl',
+        'cloudPhotoPath', 'photoStorageKey', 'photoScope', 'dataScope', 'assessmentStatus', 'imageSizeMb',
+        'userObservations', 'updatedAt'
+      ])
+      && data.title is string
+      && data.cropType in ['Cassava', 'Plantain', 'Maize', 'Vegetables', 'Other']
+      && data.date is string
+      && data.status == 'Observation'
+      && data.statusVariant == 'amber'
+      && data.summary is string
+      && data.footerIcon in ['clock', 'speaker', 'check', 'alert']
+      && data.footerStatus is string
+      && data.footerActionLabel is string
+      && data.assessmentStatus in ['pending', 'unavailable', 'failed']
+      && data.dataScope == 'cloud'
+      && data.updatedAt is timestamp
+      && data.imageUrl is string
+      && (!('cloudPhotoPath' in data) || data.cloudPhotoPath is string)
+      && (!('photoStorageKey' in data) || data.photoStorageKey is string)
+      && (!('photoScope' in data) || data.photoScope in ['cloud', 'local-only', 'missing'])
+      && (!('imageSizeMb' in data) || data.imageSizeMb is number)
+      && (!('userObservations' in data) || data.userObservations is string);
+    }
+
+    match /users/{uid} {
+      allow read: if signedInAs(uid);
+      allow create: if signedInAs(uid) && validProfile(request.resource.data);
+      allow update: if signedInAs(uid) && validProfile(request.resource.data)
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if false;
+
+      match /scans/{scanId} {
+        allow read: if signedInAs(uid);
+        allow create, update: if signedInAs(uid) && validScan(request.resource.data)
+          && (!('cloudPhotoPath' in request.resource.data)
+            || request.resource.data.cloudPhotoPath == 'users/' + uid + '/scans/' + scanId + '/photo');
+        allow delete: if signedInAs(uid);
+      }
+    }
+  }
+}
