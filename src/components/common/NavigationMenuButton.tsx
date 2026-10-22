@@ -32,6 +32,9 @@ export const NavigationMenuButton: React.FC<{ compact?: boolean }> = ({ compact 
     };
   }, [isOpen]);
 
+  const showMenu = ['/', '/scan', '/history', '/profile'].includes(location.pathname);
+  if (!showMenu) return null;
+
   const buttonSize = compact ? 'w-10 h-10' : 'w-11 h-11';
 
   return (
