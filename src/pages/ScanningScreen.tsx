@@ -14,7 +14,7 @@ export const ScanningScreen: React.FC = () => {
   const navigate = useNavigate();
   const { scanDraft, createScanFromDraft, saveScan, applyAssessment, markScanFailed } = useApp();
   const { user } = useAuth();
-  const scanProcessRef = useRef<Promise<{ scanId: string; photoUploadError?: string }> | null>(null);
+  const scanProcessRef = useRef<Promise<string> | null>(null);
 
   const [laserPos, setLaserPos] = useState<number>(20);
   const [stage, setStage] = useState<ScanStage>('Preparing scan');
@@ -46,8 +46,6 @@ export const ScanningScreen: React.FC = () => {
       scanProcessRef.current = (async () => {
         setStage('Saving scan');
         const scan = createScanFromDraft();
-        let photoUploadError = '';
-
         try {
           let photoSaved = false;
           if (scanDraft.photoFile && scan.photoStorageKey) {
@@ -55,7 +53,7 @@ export const ScanningScreen: React.FC = () => {
               await saveScanPhoto(scan.photoStorageKey, scanDraft.photoFile);
               photoSaved = true;
             } catch {
-              // Keep metadata so the failure is visible and the scan can be reviewed.
+              // Keep the scan metadata so the user can review the failed scan.
             }
           }
 
@@ -111,25 +109,21 @@ export const ScanningScreen: React.FC = () => {
               // Sync the same local photo only after that record exists.
               setStage('Uploading image');
               try { await uploadCropPhoto({ scanId: scan.id, image: localPhoto, idToken }); }
-              catch (error) {
-                photoUploadError = error instanceof Error
-                  ? error.message
-                  : 'The photo could not be saved to your account. It remains on this device for now.';
-              }
+              catch { /* The local image remains available; Scan Details retries sync when reopened. */ }
             }
           }
         } catch {
           await markScanFailed(scan.id, 'The scan could not be completed. You can retry this scan from your scan history.');
         }
 
-        return { scanId: scan.id, ...(photoUploadError ? { photoUploadError } : {}) };
+        return scan.id;
       })();
     }
 
     // React Strict Mode replays effects in development. Reuse the same scan
     // operation, but let the currently mounted effect handle navigation.
-    void scanProcessRef.current.then(({ scanId, photoUploadError }) => {
-      if (active) navigate(`/assessment/${scanId}`, { state: photoUploadError ? { photoUploadError } : null });
+    void scanProcessRef.current.then((scanId) => {
+      if (active) navigate(`/assessment/${scanId}`);
     });
     return () => { active = false; };
   }, [navigate, scanDraft.photoFile, scanDraft.cropType, scanDraft.customCropName, scanDraft.observations, createScanFromDraft, saveScan, applyAssessment, markScanFailed, user]);

@@ -45,6 +45,80 @@ Never say a disease is confirmed from a photograph. Do not invent symptoms, path
 
 Return concise JSON matching the provided schema. Keep every text field simple and brief. Use common crop names in cause names; include a scientific name only when needed and explain it in everyday words. For inconclusive cases, explain the limitation simply and suggest safe next steps.`;
 
+type GeminiFailureCategory = 'dns' | 'tls' | 'connection' | 'timeout' | 'http' | 'network' | 'provider';
+
+export type GeminiFailureDiagnostics = {
+  category: GeminiFailureCategory;
+  code: string;
+  httpStatus?: number;
+};
+
+const DNS_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'EAI_FAIL', 'EAI_NONAME']);
+const CONNECTION_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'UND_ERR_CONNECT_TIMEOUT']);
+const TLS_CODES = new Set([
+  'CERT_HAS_EXPIRED', 'CERT_NOT_YET_VALID', 'CERT_REVOKED', 'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'ERR_TLS_CERT_ALTNAME_INVALID', 'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+]);
+const TIMEOUT_CODES = new Set(['ABORT_ERR', 'ETIMEDOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT']);
+
+/** Classifies SDK/network errors without retaining or returning raw messages or credentials. */
+export function classifyGeminiFailure(error: unknown): GeminiFailureDiagnostics {
+  const chain: Array<Record<string, unknown>> = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && typeof current === 'object' && current !== null; depth += 1) {
+    const item = current as Record<string, unknown>;
+    chain.push(item);
+    current = item.cause;
+  }
+
+  const status = chain.map((item) => item.status ?? item.statusCode)
+    .find((value): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 100 && value <= 599);
+  if (status !== undefined) return { category: 'http', code: 'HTTP_RESPONSE', httpStatus: status };
+
+  const codes = chain.map((item) => item.code).filter((value): value is string => typeof value === 'string');
+  const names = chain.map((item) => item.name).filter((value): value is string => typeof value === 'string');
+  const messages = chain.map((item) => item.message).filter((value): value is string => typeof value === 'string');
+
+  for (const code of codes) {
+    if (DNS_CODES.has(code)) return { category: 'dns', code };
+    if (TLS_CODES.has(code) || /^ERR_(TLS|SSL)_[A-Z0-9_]+$/.test(code)) return { category: 'tls', code };
+    if (TIMEOUT_CODES.has(code)) return { category: 'timeout', code };
+    if (CONNECTION_CODES.has(code)) return { category: 'connection', code };
+  }
+  if (names.includes('AbortError') || codes.includes('AbortError') || messages.some((message) => /timeout|timed out/i.test(message))) {
+    return { category: 'timeout', code: 'REQUEST_TIMEOUT' };
+  }
+  if (names.includes('TypeError') || messages.some((message) => /^fetch failed/i.test(message))) {
+    return { category: 'network', code: 'FETCH_FAILED' };
+  }
+  return { category: 'provider', code: 'UNKNOWN_PROVIDER_ERROR' };
+}
+
+function logGeminiFailure(error: unknown, startedAt: number): GeminiFailureDiagnostics {
+  const details = classifyGeminiFailure(error);
+  console.error(`Assessment provider request failed; category=${details.category}; code=${details.code}; httpStatus=${details.httpStatus ?? 'none'}; elapsedMs=${Math.max(0, Math.round(performance.now() - startedAt))}.`);
+  return details;
+}
+
+export function mapGeminiProviderFailure(error: unknown): ProviderError {
+  const failure = classifyGeminiFailure(error);
+  const status = failure.httpStatus ?? 0;
+  if (status === 429) return new ProviderError('GEMINI_QUOTA', 429, 'The assessment service is busy or at its request limit. Please try again later.');
+  if (status === 408 || status === 504 || failure.category === 'timeout') {
+    return new ProviderError('GEMINI_TIMEOUT', 504, 'The assessment took too long. You can retry when your connection is stable.');
+  }
+  if (status === 401 || status === 403) {
+    return new ProviderError('GEMINI_AUTH_FAILED', 503, 'The assessment service could not authenticate. Contact the app administrator.', false);
+  }
+  if (status === 404) {
+    return new ProviderError('GEMINI_MODEL_UNAVAILABLE', 502, 'The assessment service model is unavailable. Contact the app administrator.', false);
+  }
+  if (status === 400) {
+    return new ProviderError('GEMINI_REQUEST_REJECTED', 502, 'The assessment service rejected its request. Contact the app administrator.', false);
+  }
+  return new ProviderError('GEMINI_UNAVAILABLE', 502);
+}
+
 const pidginTranslationSchema = {
   type: Type.OBJECT,
   properties: {
@@ -119,6 +193,7 @@ export async function assessWithGemini(
   model: string,
 ): Promise<unknown> {
   const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 90_000, retryOptions: { attempts: 1 } } });
+  const startedAt = performance.now();
   let response;
   try {
     response = await ai.models.generateContent({
@@ -137,27 +212,8 @@ export async function assessWithGemini(
       },
     });
   } catch (error) {
-    const status = typeof error === 'object' && error !== null && 'status' in error
-      ? Number((error as { status: unknown }).status)
-      : 0;
-    if (status === 429) throw new ProviderError('GEMINI_QUOTA', 429, 'The assessment service is busy or at its request limit. Please try again later.');
-    if (status === 408 || (error instanceof Error && /timeout/i.test(error.message))) {
-      throw new ProviderError('GEMINI_TIMEOUT', 504, 'The assessment took too long. You can retry when your connection is stable.');
-    }
-    if (status === 401 || status === 403) {
-      console.error('Assessment provider rejected server credentials (HTTP authentication failure).');
-      throw new ProviderError('GEMINI_AUTH_FAILED', 503, 'The assessment service could not authenticate. Contact the app administrator.', false);
-    }
-    if (status === 404) {
-      console.error('Assessment provider model or endpoint was not found (HTTP 404).');
-      throw new ProviderError('GEMINI_MODEL_UNAVAILABLE', 502, 'The assessment service model is unavailable. Contact the app administrator.', false);
-    }
-    if (status === 400) {
-      console.error('Assessment provider rejected the request format or model configuration (HTTP 400).');
-      throw new ProviderError('GEMINI_REQUEST_REJECTED', 502, 'The assessment service rejected its request. Contact the app administrator.', false);
-    }
-    console.error(`Assessment provider request failed; category=${status ? 'http' : error instanceof Error && /fetch|network|connect/i.test(error.name) ? 'network' : 'provider'}; httpStatus=${status || 'none'}.`);
-    throw new ProviderError('GEMINI_UNAVAILABLE', 502);
+    logGeminiFailure(error, startedAt);
+    throw mapGeminiProviderFailure(error);
   }
 
   const text = response.text;

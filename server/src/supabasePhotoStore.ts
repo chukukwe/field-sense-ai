@@ -33,14 +33,14 @@ export function createSupabasePhotoStore(config: SupabasePhotoStoreConfig) {
     if (operation === 'delete' && response.status === 404) return response;
     const category = response.status === 401 ? 'invalid_credentials'
       : response.status === 403 ? 'authorization'
-        : operation === 'upload' && response.status === 404 ? 'bucket_missing'
+        : response.status === 404 ? 'not_found'
           : response.status >= 500 ? 'upstream' : 'request_rejected';
     throw new PhotoStorageError(category, response.status);
   };
 
   return {
     async upload(path: string, image: Buffer, contentType: string): Promise<void> {
-      await request(objectUrl(path), { method: 'PUT', headers: headers({ 'Content-Type': contentType, 'x-upsert': 'true', 'Cache-Control': 'private, max-age=0, no-store' }), body: new Uint8Array(image) }, 'upload');
+      await request(objectUrl(path), { method: 'POST', headers: headers({ 'Content-Type': contentType, 'x-upsert': 'true', 'Cache-Control': 'private, max-age=0, no-store' }), body: new Uint8Array(image) }, 'upload');
     },
     async download(path: string): Promise<{ bytes: Buffer; contentType: string } | null> {
       const response = await request(objectUrl(path), { headers: headers(), cache: 'no-store' }, 'download');

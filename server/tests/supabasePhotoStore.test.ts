@@ -17,7 +17,7 @@ describe('Supabase private Storage adapter', () => {
     const uploadInit = uploadRequest.init;
     assert.ok(uploadInit);
     assert.equal(uploadRequest.url, 'https://project.supabase.co/storage/v1/object/crop-photos/users/uid/scans/scan-1/photo');
-    assert.equal(uploadInit.method, 'PUT');
+    assert.equal(uploadInit.method, 'POST');
     const headers = new Headers(uploadInit.headers);
     assert.equal(headers.get('apikey'), 'test-only-server-secret');
     assert.equal(headers.has('authorization'), false);
@@ -56,11 +56,11 @@ describe('Supabase private Storage adapter', () => {
     await store.remove('users/uid/scans/scan-1/photo');
   });
 
-  it('classifies storage authentication, authorization, bucket, and transport failures without reading error bodies', async () => {
+  it('classifies storage authentication, not-found, and transport failures without reading error bodies', async () => {
     const cases = [
       [401, 'invalid_credentials'],
       [403, 'authorization'],
-      [404, 'bucket_missing'],
+      [404, 'not_found'],
       [502, 'upstream'],
     ] as const;
     for (const [status, category] of cases) {

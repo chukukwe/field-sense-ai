@@ -45,12 +45,12 @@ describe('protected crop photo storage API', () => {
     assert.equal(response.body.error.code, 'PHOTO_STORAGE_NOT_CONFIGURED');
   });
 
-  it('returns a sanitized setup error when the configured private bucket is missing', async () => {
-    const { app } = setup({ upload: async () => { throw new PhotoStorageError('bucket_missing', 404); } });
+  it('returns a sanitized not-found error for an unavailable storage route or resource', async () => {
+    const { app } = setup({ upload: async () => { throw new PhotoStorageError('not_found', 404); } });
     const response = await request(app).post('/api/scans/scan-test/photo').set('Authorization', 'Bearer owner-token')
       .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
     assert.equal(response.status, 503);
-    assert.equal(response.body.error.code, 'PHOTO_STORAGE_BUCKET_MISSING');
+    assert.equal(response.body.error.code, 'PHOTO_STORAGE_NOT_FOUND');
     assert.equal(JSON.stringify(response.body).includes('secret'), false);
   });
 

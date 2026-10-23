@@ -8,7 +8,6 @@ const navigationItems = [
   { label: 'Home', path: '/' },
   { label: 'Scan a crop', path: '/scan' },
   { label: 'Scan history', path: '/history' },
-  { label: 'Season Recommendation', path: '/season-sense' },
   { label: 'Profile', path: '/profile' },
 ];
 

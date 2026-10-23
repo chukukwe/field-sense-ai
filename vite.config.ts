@@ -10,6 +10,9 @@ export default defineConfig({
       '/api': {
         target: process.env.BACKEND_URL || 'http://localhost:8787',
         changeOrigin: true,
+        // The app is same-origin through this proxy; use its default local
+        // origin so a 127.0.0.1 preview also passes the API's dev allowlist.
+        headers: { origin: 'http://localhost:5173' },
       },
     },
   },

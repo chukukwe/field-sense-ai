@@ -1,7 +1,7 @@
 export type PhotoStorageFailureCategory =
   | 'invalid_credentials'
   | 'authorization'
-  | 'bucket_missing'
+  | 'not_found'
   | 'timeout'
   | 'network'
   | 'upstream'

@@ -4,7 +4,7 @@ import request from 'supertest';
 import sharp from 'sharp';
 import type { CropAssessmentResult } from '../src/assessmentSchema.js';
 import { createApp, ProviderError, type AnalyzeDependencies } from '../src/app.js';
-import { preservesNumbers } from '../src/gemini.js';
+import { classifyGeminiFailure, mapGeminiProviderFailure, preservesNumbers } from '../src/gemini.js';
 
 const png = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#30a060' } }).png().toBuffer();
 const assessment: CropAssessmentResult = {
@@ -19,6 +19,51 @@ const assessment: CropAssessmentResult = {
   limitations: ['Only one leaf is shown.'],
   disclaimer: 'AI-assisted visual assessment, not a confirmed diagnosis.',
 };
+
+describe('Gemini failure diagnostics', () => {
+  it('finds a DNS error nested under the fetch TypeError without retaining its message', () => {
+    const cause = Object.assign(new Error('private socket detail'), { code: 'ENOTFOUND' });
+    const error = new TypeError('fetch failed', { cause });
+    const diagnostics = classifyGeminiFailure(error);
+    assert.deepEqual(diagnostics, { category: 'dns', code: 'ENOTFOUND' });
+    assert.equal(JSON.stringify(diagnostics).includes('private socket detail'), false);
+  });
+
+  it('classifies an unwrapped fetch TypeError as a network failure', () => {
+    assert.deepEqual(classifyGeminiFailure(new TypeError('fetch failed')), {
+      category: 'network', code: 'FETCH_FAILED',
+    });
+  });
+
+  it('recognizes TLS, connection, timeout, and HTTP failures from safe codes only', () => {
+    assert.deepEqual(classifyGeminiFailure(Object.assign(new Error('TLS failure'), { code: 'ERR_TLS_CERT_ALTNAME_INVALID' })), {
+      category: 'tls', code: 'ERR_TLS_CERT_ALTNAME_INVALID',
+    });
+    assert.deepEqual(classifyGeminiFailure(Object.assign(new Error('socket reset'), { code: 'ECONNRESET' })), {
+      category: 'connection', code: 'ECONNRESET',
+    });
+    assert.deepEqual(classifyGeminiFailure(Object.assign(new Error('request cancelled'), { name: 'AbortError' })), {
+      category: 'timeout', code: 'REQUEST_TIMEOUT',
+    });
+    assert.deepEqual(classifyGeminiFailure(Object.assign(new Error('provider rejected request'), { status: 401 })), {
+      category: 'http', code: 'HTTP_RESPONSE', httpStatus: 401,
+    });
+  });
+
+  it('does not expose arbitrary provider error text in diagnostics', () => {
+    const diagnostics = classifyGeminiFailure(new Error('sensitive response body and credential-like text'));
+    assert.deepEqual(diagnostics, { category: 'provider', code: 'UNKNOWN_PROVIDER_ERROR' });
+    assert.equal(JSON.stringify(diagnostics).includes('sensitive'), false);
+  });
+
+  it('maps an upstream gateway timeout to the retryable timeout response', () => {
+    const failure = mapGeminiProviderFailure(Object.assign(new Error('gateway response'), { status: 504 }));
+    assert.equal(failure.code, 'GEMINI_TIMEOUT');
+    assert.equal(failure.status, 504);
+    assert.equal(failure.retryable, true);
+    assert.equal(failure.publicMessage.includes('gateway response'), false);
+  });
+});
 
 function setup(overrides: Partial<AnalyzeDependencies> = {}) {
   const persisted: CropAssessmentResult[] = [];

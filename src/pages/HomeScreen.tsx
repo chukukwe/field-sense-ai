@@ -79,26 +79,6 @@ export const HomeScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Seasonal crop recommendations promo ── */}
-        <div className="overflow-hidden rounded-2xl border border-[#323633] bg-[#292C2A] shadow-sm">
-          <div className="relative h-[178px] bg-[#181B19]">
-            <img
-              src="/assets/leaf-observation.png"
-              alt="A farmer inspecting leaves in a crop field"
-              className="h-full w-full object-cover"
-              loading="lazy"
-            />
-          </div>
-
-          <div className="p-4">
-            <h3 className="mt-4 max-w-[300px] text-lg font-bold leading-snug tracking-tight text-white">Plant at the right time. Prepare for the season.</h3>
-            <p className="mt-2 text-xs leading-relaxed text-[#D1D5DB]">Browse sample crop-planning windows by farming zone.</p>
-            <button onClick={() => navigate('/season-sense')} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#176B45] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#1eb968] active:scale-[0.98]">
-              See recommendations
-            </button>
-          </div>
-        </div>
-
         {/* ── Recent Scans Section ── */}
         <div className="flex flex-col gap-3">
           {/* Section header */}

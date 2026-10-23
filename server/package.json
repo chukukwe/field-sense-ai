@@ -8,13 +8,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "season:pilot-import": "npm run build && node dist/server/src/importSeasonCalendarPilot.js",
-    "season:calendar-prepare": "npm run build && node dist/server/src/prepareAfricanCropCalendar.js",
-    "season:calendar-import": "npm run build && node dist/server/src/importAfricanCropCalendar.js",
-    "season:zones-import": "npm run build && node dist/server/src/importSeasonZoneMapping.js",
-    "season:bonn-calendar-import": "npm run build && node dist/server/src/importBonnCropCalendar.js",
     "start": "node dist/server/src/index.js",
-    "test": "tsc -p tsconfig.test.json && node --test .test-dist/server/tests/analyzeCrop.test.js .test-dist/server/tests/assessmentApi.test.js .test-dist/server/tests/photoStorage.test.js .test-dist/server/tests/photoApi.test.js .test-dist/server/tests/supabasePhotoStore.test.js .test-dist/server/tests/seasonWeather.test.js .test-dist/server/tests/seasonSense.test.js .test-dist/server/tests/nigeriaLocation.test.js .test-dist/server/tests/seasonRecommendations.test.js .test-dist/server/tests/seasonPlanningApi.test.js .test-dist/server/tests/seasonCalendarPilot.test.js .test-dist/server/tests/seasonCalendarSource.test.js .test-dist/server/tests/cropFamilies.test.js .test-dist/server/tests/seasonPlanningDemo.test.js .test-dist/server/tests/nimetService.test.js .test-dist/server/tests/seasonRainfallApi.test.js"
+    "test": "tsc -p tsconfig.test.json && node --test .test-dist/server/tests/analyzeCrop.test.js .test-dist/server/tests/assessmentApi.test.js .test-dist/server/tests/photoStorage.test.js .test-dist/server/tests/photoApi.test.js .test-dist/server/tests/supabasePhotoStore.test.js .test-dist/server/tests/cropFamilies.test.js"
   },
   "dependencies": {
     "@google/genai": "^2.30.0",

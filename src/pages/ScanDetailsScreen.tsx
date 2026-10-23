@@ -19,10 +19,7 @@ export const ScanDetailsScreen: React.FC = () => {
   const { user } = useAuth();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [photoBusy, setPhotoBusy] = useState(false);
-  const [photoMessage, setPhotoMessage] = useState('');
   const [photoReload, setPhotoReload] = useState(0);
-  const [canRetryUpload, setCanRetryUpload] = useState(false);
   const [assessmentBusy, setAssessmentBusy] = useState(false);
   const [assessmentMessage, setAssessmentMessage] = useState('');
   const photoInput = useRef<HTMLInputElement>(null);
@@ -50,29 +47,17 @@ export const ScanDetailsScreen: React.FC = () => {
     replacement?: File,
     openPickerWhenMissing = true,
   ) => {
-    if (!scanToUpload || !authenticatedUser) {
-      setPhotoMessage('Sign in again before saving this photo.');
-      return;
-    }
-    setPhotoBusy(true);
-    setPhotoMessage('');
+    if (!scanToUpload || !authenticatedUser) return;
     try {
       if (!replacement && !scanToUpload.photoStorageKey) {
         if (openPickerWhenMissing) photoInput.current?.click();
-        setPhotoMessage('The original photo is not saved on this device. Choose the original file to restore it.');
         return;
       }
       await uploadLocalScanPhoto({ scanId: scanToUpload.id, photoStorageKey: scanToUpload.photoStorageKey ?? scanToUpload.id, idToken: await authenticatedUser.getIdToken(), replacement });
-      setCanRetryUpload(false);
-      setPhotoMessage('Photo saved to your account. It will be available on your other signed-in devices.');
       setPhotoReload((value) => value + 1);
     } catch (error) {
       const missingLocalPhoto = error instanceof CropPhotoRequestError && error.code === 'LEGACY_PHOTO_MISSING';
-      setCanRetryUpload(!missingLocalPhoto);
       if (missingLocalPhoto && openPickerWhenMissing) photoInput.current?.click();
-      setPhotoMessage(error instanceof Error ? `${error.message} Your local photo is still kept; retry when ready.` : 'Photo upload failed. Your local photo is still kept; retry when ready.');
-    } finally {
-      setPhotoBusy(false);
     }
   }, []);
 
@@ -83,21 +68,8 @@ export const ScanDetailsScreen: React.FC = () => {
     const attemptKey = `${scan.id}:${scan.photoStorageKey}`;
     if (autoUploadAttempt.current === attemptKey) return;
     autoUploadAttempt.current = attemptKey;
-    setPhotoMessage('Syncing this photo to your account…');
     void uploadExistingPhoto(scan, user, undefined, false);
   }, [scan, user, uploadExistingPhoto]);
-
-  const retryPhotoLoad = async () => {
-    if (!scan?.cloudPhotoPath || !user) return;
-    setPhotoBusy(true);
-    setPhotoMessage('');
-    try {
-      await getCloudCropPhoto({ scanId: scan.id, idToken: await user.getIdToken() });
-      setPhotoReload((value) => value + 1);
-    } catch (error) {
-      setPhotoMessage(error instanceof Error ? error.message : 'The saved photo could not be loaded. Retry your connection or upload it again.');
-    } finally { setPhotoBusy(false); }
-  };
 
   const retryAssessment = async () => {
     if (!scan || scan.assessmentStatus !== 'failed' || assessmentBusy || !user) return;
@@ -174,27 +146,11 @@ export const ScanDetailsScreen: React.FC = () => {
           </span>
         </div>
 
-        <div className="flex flex-col gap-2">
-          <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => {
-            const selected = event.currentTarget.files?.[0];
-            event.currentTarget.value = '';
-            if (selected) void uploadExistingPhoto(scan, user, selected);
-          }} />
-          {scan.cloudPhotoPath ? (
-            <>
-              <button disabled={photoBusy} onClick={() => void retryPhotoLoad()} className="self-start text-xs font-semibold text-[#1EB968] disabled:opacity-50">
-                {photoBusy ? 'Loading photo…' : 'Retry loading photo'}
-              </button>
-            </>
-          ) : (
-            (canRetryUpload || (scan.photoScope === 'local-only' && Boolean(scan.photoStorageKey))) && <button disabled={photoBusy} onClick={() => void uploadExistingPhoto(scan, user, undefined, false)} className="self-start text-xs font-semibold text-[#1EB968] disabled:opacity-50">
-              {photoBusy ? 'Syncing photo…' : 'Retry cloud sync'}
-            </button>
-          )}
-          <button disabled={photoBusy} onClick={() => photoInput.current?.click()} className="self-start text-xs text-[#D1D5DB] disabled:opacity-50">Choose original photo</button>
-          {photoMessage && <p role="status" className="text-[11px] text-[#D1D5DB] leading-relaxed">{photoMessage}</p>}
-          {!scan.cloudPhotoPath && scan.photoScope === 'local-only' && <p className="text-[11px] text-[#8F9490]">This photo is stored on this device. We’ll sync it to your account automatically when cloud storage is available.</p>}
-        </div>
+        <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => {
+          const selected = event.currentTarget.files?.[0];
+          event.currentTarget.value = '';
+          if (selected) void uploadExistingPhoto(scan, user, selected);
+        }} />
 
         {scan.assessmentStatus === 'failed' && <section className="rounded-2xl border border-[#B36A2D] bg-[#2E2319] p-4" aria-label="Assessment retry">
           <h3 className="text-sm font-bold text-white">Assessment failed</h3>
@@ -204,7 +160,7 @@ export const ScanDetailsScreen: React.FC = () => {
             {assessmentBusy ? 'Analyzing crop…' : 'Retry assessment'}
           </button>
           {assessmentMessage && <p role="alert" className="mt-2 text-xs text-[#FFB4A8]">{assessmentMessage}</p>}
-          {!scan.photoStorageKey && !scan.cloudPhotoPath && <button type="button" onClick={() => photoInput.current?.click()} className="mt-2 text-xs font-semibold text-[#1EB968]">Choose or capture a photo</button>}
+          {(scan.photoScope === 'missing' || (!scan.photoStorageKey && !scan.cloudPhotoPath)) && <button type="button" onClick={() => photoInput.current?.click()} className="mt-2 text-xs font-semibold text-[#1EB968]">Choose a replacement photo</button>}
         </section>}
 
         {/* ── What Was Found ── */}

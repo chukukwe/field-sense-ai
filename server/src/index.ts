@@ -5,10 +5,6 @@ import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { createApp, ProviderError } from './app.js';
 import { assessWithGemini, translateAssessmentToPidgin } from './gemini.js';
 import { createSupabasePhotoStore } from './supabasePhotoStore.js';
-import { createNigeriaReverseGeocoder } from './location.js';
-import { getWeatherForecastForLocation, type WeatherRequestLocation } from './weather.js';
-import { createNimetService } from './nimet.js';
-import { createSeasonRecommendationService } from './seasonRecommendations.js';
 
 const port = Number(process.env.PORT || 8787);
 const maxImageMb = Number(process.env.MAX_IMAGE_MB || 8);
@@ -20,12 +16,6 @@ const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseApiKey = supabaseSecretKey || supabaseServiceKey;
 const supabaseBucket = process.env.SUPABASE_PHOTO_BUCKET || 'crop-photos';
-const nimet = createNimetService(process.env.NIMET_API_KEY);
-const reverseGeocode = createNigeriaReverseGeocoder(
-  fetch,
-  process.env.NOMINATIM_REVERSE_URL || 'https://nominatim.openstreetmap.org/reverse',
-  process.env.NOMINATIM_USER_AGENT || 'FieldVoiceAI/1.0',
-);
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173')
   .split(',')
   .map((origin) => origin.trim())
@@ -61,24 +51,7 @@ if (!photoStore) {
 const app = createApp({
   allowedOrigins,
   maxImageBytes: maxImageMb * 1024 * 1024,
-  seasonRecommendations: createSeasonRecommendationService(),
-  getSeasonalRainfall: (request) => nimet.getSeasonalRainfall(request),
   photoStore,
-  getWeatherForecast: (() => {
-    const cache = new Map<string, { forecast: Awaited<ReturnType<typeof getWeatherForecastForLocation>>; cachedAt: number }>();
-    return async (location: WeatherRequestLocation) => {
-      const key = location.kind === 'eket' ? 'eket' : `${location.latitude},${location.longitude}`;
-      const now = Date.now();
-      const cached = cache.get(key);
-      if (cached && now - cached.cachedAt < 15 * 60 * 1000) return cached.forecast;
-      if (cached) cache.delete(key);
-      const next = await getWeatherForecastForLocation(location);
-      if (cache.size >= 100) cache.delete(cache.keys().next().value!);
-      cache.set(key, { forecast: next, cachedAt: Date.now() });
-      return next;
-    };
-  })(),
-  resolveDeviceLocation: reverseGeocode,
   verifyIdToken: async (token) => auth.verifyIdToken(token, true),
   claimScan: async (uid, scanId, cropType, details) => {
     const ref = db.doc(`users/${uid}/scans/${scanId}`);
