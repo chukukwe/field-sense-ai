@@ -11,6 +11,7 @@ import { getScanPhoto } from '../data/photoStore';
 import { usePidginAssessment } from '../data/usePidginAssessment';
 import { PidginAssessmentControls } from '../components/common/PidginAssessmentControls';
 import { simpleConfidence, simpleLikelihood } from '../data/assessmentLanguage';
+import { canOfferSampleCropResult } from '../data/sampleCropResults';
 
 export const ScanDetailsScreen: React.FC = () => {
   const navigate = useNavigate();
@@ -27,6 +28,8 @@ export const ScanDetailsScreen: React.FC = () => {
 
   const scan = scans.find((item) => item.id === id);
   const diagnosis = scan?.diagnosis;
+  const canViewSample = Boolean(scan && !scan.assessment && !diagnosis
+    && canOfferSampleCropResult(scan.assessmentFailure, scan.cropType));
   const { language, setLanguage, translated, display: assessment, loading: translationLoading, error: translationError } = usePidginAssessment(scan?.id, scan?.assessment);
   const isSampleScan = Boolean(scan && /^scan-[1-4]$/.test(scan.id));
 
@@ -96,7 +99,12 @@ export const ScanDetailsScreen: React.FC = () => {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The assessment could not be completed. Retry when you are ready.';
       setAssessmentMessage(message);
-      if (!(error instanceof AssessmentRequestError && error.code === 'ALREADY_PROCESSING')) await markScanFailed(scan.id, message);
+      if (!(error instanceof AssessmentRequestError && error.code === 'ALREADY_PROCESSING')) {
+        const failure = error instanceof AssessmentRequestError && error.status !== undefined
+          ? { code: error.code, status: error.status }
+          : undefined;
+        await markScanFailed(scan.id, message, failure);
+      }
     } finally {
       setAssessmentBusy(false);
     }
@@ -153,13 +161,19 @@ export const ScanDetailsScreen: React.FC = () => {
         }} />
 
         {scan.assessmentStatus === 'failed' && <section className="rounded-2xl border border-[#B36A2D] bg-[#2E2319] p-4" aria-label="Assessment retry">
-          <h3 className="text-sm font-bold text-white">Assessment failed</h3>
+          <h3 className="text-sm font-bold text-white">Crop check could not finish</h3>
           <p className="mt-1 text-xs leading-relaxed text-[#D1D5DB]">{scan.summary}</p>
-          <button type="button" onClick={() => void retryAssessment()} disabled={assessmentBusy}
+          {!canViewSample && <button type="button" onClick={() => void retryAssessment()} disabled={assessmentBusy}
             className="mt-3 w-full rounded-xl bg-[#176B45] py-3 text-xs font-semibold text-white hover:bg-[#1eb968] disabled:opacity-60">
-            {assessmentBusy ? 'Analyzing crop…' : 'Retry assessment'}
-          </button>
-          {assessmentMessage && <p role="alert" className="mt-2 text-xs text-[#FFB4A8]">{assessmentMessage}</p>}
+            {assessmentBusy ? 'Checking your crop…' : 'Try again'}
+          </button>}
+          {canViewSample && <div className="mt-3 rounded-xl border border-[#5C3A1E] bg-[#241C15] p-3">
+            <p className="text-xs font-semibold text-[#FFD29D]">Crop check is unavailable right now.</p>
+            <p className="mt-1 text-xs leading-relaxed text-[#F2D1AE]">We can show you an example result while you wait.</p>
+            <button type="button" onClick={() => navigate('/sample-result', { state: { scanId: scan.id, source: 'scan-details', cropType: scan.cropType, failure: scan.assessmentFailure } })} className="mt-3 w-full rounded-xl bg-[#176B45] py-3 text-xs font-semibold text-white transition hover:bg-[#1eb968]">View sample result</button>
+            <button type="button" onClick={() => navigate('/')} className="mt-2 w-full rounded-xl bg-[#292C2A] py-3 text-xs font-semibold text-white transition hover:bg-[#343835]">Try again later</button>
+          </div>}
+          {assessmentMessage && assessmentMessage !== scan.summary && <p role="alert" className="mt-2 text-xs text-[#FFB4A8]">{assessmentMessage}</p>}
           {(scan.photoScope === 'missing' || (!scan.photoStorageKey && !scan.cloudPhotoPath)) && <button type="button" onClick={() => photoInput.current?.click()} className="mt-2 text-xs font-semibold text-[#1EB968]">Choose a replacement photo</button>}
         </section>}
 
@@ -167,7 +181,7 @@ export const ScanDetailsScreen: React.FC = () => {
         <div className="bg-[#292C2A] rounded-2xl p-4 border border-[#323633]">
           <div className="flex items-center justify-between mb-3 gap-2">
             <h3 className="text-base font-bold text-white">
-              {diagnosis || assessment ? 'What was found' : 'Scan status'}
+              {diagnosis || assessment ? 'What we found' : 'Crop check status'}
             </h3>
             {scan.statusVariant === 'red' && (
               <span className="bg-[#3E1F1F] text-[#E04141] text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider shrink-0">
@@ -187,24 +201,24 @@ export const ScanDetailsScreen: React.FC = () => {
           </div>
 
           <div className="flex flex-col gap-2.5">
-            {/* Primary Diagnosis */}
+            {/* Possible problem */}
             {diagnosis && (
               <div className="bg-[#1F2B25] p-3.5 rounded-xl border border-[#273B30]">
                 <span className="text-[11px] font-bold text-[#FF8A32] block mb-0.5">
-                  Primary Diagnosis
+                  Possible problem
                 </span>
                 <h4 className="text-sm font-bold text-[#22C55E] mb-1 leading-snug">
                   {diagnosis.title}
                 </h4>
                 <p className="text-[11px] text-[#A1A7A3]">
-                  Possible cause identified • Evidence based on visible symptoms
+                  Possible cause from visible signs
                 </p>
               </div>
             )}
 
             {!diagnosis && !assessment && (
               <div className="bg-[#2E2319] p-3.5 rounded-xl border border-[#B36A2D]">
-                <h4 className="text-sm font-bold text-white mb-1">{scan.assessmentStatus === 'failed' ? 'Assessment could not be completed' : 'No AI assessment available'}</h4>
+                <h4 className="text-sm font-bold text-white mb-1">{scan.assessmentStatus === 'failed' ? 'Crop check could not finish' : 'No crop check yet'}</h4>
                 <p className="text-[11px] text-[#D1D5DB] leading-relaxed">{scan.summary}</p>
                 {scan.userObservations && (
                   <p className="text-[11px] text-[#D1D5DB] mt-2">Your note: {scan.userObservations}</p>
@@ -217,9 +231,9 @@ export const ScanDetailsScreen: React.FC = () => {
                 <PidginAssessmentControls language={language} onLanguageChange={setLanguage} loading={translationLoading} error={translationError}
                   text={language === 'pidgin' && translated ? [assessment.summary, assessment.confidenceReason, ...assessment.observedSymptoms, ...assessment.possibleCauses.flatMap((cause) => [cause.name, cause.explanation]), ...assessment.recommendedActions, ...assessment.preventionTips, assessment.whenToSeekHelp, ...assessment.limitations, assessment.disclaimer].join('. ') : ''} />
                 <div>
-                  <span className="text-[11px] font-bold text-[#FF8A32] block mb-0.5">{assessment.status === 'inconclusive' ? 'Inconclusive visual assessment' : 'AI-assisted visual assessment'}</span>
+                  <span className="text-[11px] font-bold text-[#FF8A32] block mb-0.5">{assessment.status === 'inconclusive' ? 'Not sure yet' : 'Crop check from your photo'}</span>
                   <h4 className="text-sm font-bold text-white mb-1 leading-snug">{assessment.summary}</h4>
-                  <p className="text-[11px] text-[#A1A7A3]">Selected crop: {scan.customCropName || scan.cropType} · How sure: {simpleConfidence(assessment.confidence)}</p>
+                  <p className="text-[11px] text-[#A1A7A3]">Crop: {scan.customCropName || scan.cropType} · How sure: {simpleConfidence(assessment.confidence)}</p>
                   <p className="text-[11px] text-[#A1A7A3] mt-1">{assessment.confidenceReason}</p>
                 </div>
                 {!!assessment.observedSymptoms.length && <div>
@@ -227,7 +241,7 @@ export const ScanDetailsScreen: React.FC = () => {
                   <ul className="list-disc pl-4 text-[11px] text-[#D1D5DB] space-y-1">{assessment.observedSymptoms.map((symptom, index) => <li key={`${index}-${symptom}`}>{symptom}</li>)}</ul>
                 </div>}
                 {!!assessment.possibleCauses.length && <div>
-                  <h5 className="text-xs font-bold text-white mb-1">Possible causes</h5>
+                  <h5 className="text-xs font-bold text-white mb-1">What may be wrong</h5>
                   <div className="flex flex-col gap-2">{assessment.possibleCauses.map((cause, index) => <div key={`${index}-${cause.name}`} className="bg-[#383B39] p-3 rounded-xl">
                   <p className="text-xs font-bold text-white">{cause.name} <span className="text-[#FF8A32] font-medium">· {simpleLikelihood(cause.likelihood)}</span></p>
                     <p className="text-[11px] text-[#D1D5DB] mt-1 leading-relaxed">{cause.explanation}</p>
@@ -241,7 +255,7 @@ export const ScanDetailsScreen: React.FC = () => {
             <div className="bg-[#383B39] p-3.5 rounded-xl flex flex-col gap-3">
               {diagnosis?.observedOnLeaf && (
                 <div>
-                  <h5 className="text-xs font-bold text-white mb-1">Visible Symptoms</h5>
+                  <h5 className="text-xs font-bold text-white mb-1">What we can see</h5>
                   <p className="text-xs text-[#D1D5DB] leading-relaxed">
                     {diagnosis.observedOnLeaf}
                   </p>
@@ -250,7 +264,7 @@ export const ScanDetailsScreen: React.FC = () => {
 
               {diagnosis?.whyItMatters && (
                 <div className="border-t border-white/10 pt-2.5">
-                  <h5 className="text-xs font-bold text-white mb-1">Context & Spread</h5>
+                  <h5 className="text-xs font-bold text-white mb-1">What may happen next</h5>
                   <p className="text-xs text-[#D1D5DB] leading-relaxed">
                     {diagnosis.whyItMatters}
                   </p>
@@ -266,11 +280,11 @@ export const ScanDetailsScreen: React.FC = () => {
                   <ul className="list-disc pl-4 text-xs text-[#D1D5DB] leading-relaxed space-y-1">{assessment.preventionTips.map((tip, index) => <li key={`${index}-${tip}`}>{tip}</li>)}</ul>
                 </div>}
                 {assessment.limitations.length > 0 && <div className="border-t border-white/10 pt-2.5">
-                  <h5 className="text-xs font-bold text-white mb-1">Assessment limitations</h5>
+                  <h5 className="text-xs font-bold text-white mb-1">What this photo cannot show</h5>
                   <ul className="list-disc pl-4 text-xs text-[#D1D5DB] leading-relaxed space-y-1">{assessment.limitations.map((limitation, index) => <li key={`${index}-${limitation}`}>{limitation}</li>)}</ul>
                 </div>}
                 <div className="border-t border-white/10 pt-2.5">
-                  <h5 className="text-xs font-bold text-white mb-1">When to seek help</h5>
+                  <h5 className="text-xs font-bold text-white mb-1">When to ask for help</h5>
                   <p className="text-xs text-[#D1D5DB] leading-relaxed">{assessment.whenToSeekHelp}</p>
                 </div>
               </>}

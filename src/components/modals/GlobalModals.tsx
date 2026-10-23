@@ -41,19 +41,19 @@ export const GlobalModals: React.FC = () => {
           <div className="w-14 h-14 rounded-full bg-white flex items-center justify-center mb-4 text-[#176B45]">
             <HelpCircle className="w-8 h-8" />
           </div>
-          <h2 className="text-lg font-bold mb-2">FieldVoice AI Guidance</h2>
+          <h2 className="text-lg font-bold mb-2">FarmPal help</h2>
           <div className="text-left text-xs text-[#D1D5DB] space-y-3 mb-6">
             <div className="bg-[#292C2A] p-3 rounded-xl">
-              <p className="font-semibold text-white mb-1">📸 Taking Clear Photos</p>
-              <p>Hold your phone 20cm from the affected leaf. Shield harsh midday glare with your shadow to reveal leaf patterns clearly.</p>
+              <p className="font-semibold text-white mb-1">Taking a clear photo</p>
+              <p>Move close to the affected leaf. Use good light and keep the photo steady.</p>
             </div>
             <div className="bg-[#292C2A] p-3 rounded-xl">
-              <p className="font-semibold text-white mb-1">🌱 Understanding Diagnostics</p>
-              <p>AI results provide agronomic screening guidance based on visible symptoms. They are not a confirmed laboratory diagnosis.</p>
+              <p className="font-semibold text-white mb-1">Understanding a result</p>
+              <p>A photo check can be wrong. It cannot confirm a plant disease.</p>
             </div>
             <div className="bg-[#292C2A] p-3 rounded-xl">
-              <p className="font-semibold text-white mb-1">👨‍🌾 Extension Worker Support</p>
-              <p>If symptoms spread rapidly to adjacent stands, always consult your zonal AKADEP agricultural officer for on-field verification.</p>
+              <p className="font-semibold text-white mb-1">Ask for help</p>
+              <p>Talk to a local farm adviser if the problem spreads or you are unsure what to do.</p>
             </div>
           </div>
           <button
@@ -77,7 +77,7 @@ export const GlobalModals: React.FC = () => {
           </p>
           <div className="text-xs text-left bg-[#292C2A] p-3.5 rounded-xl text-[#D1D5DB] mb-5 leading-relaxed">
             <p className="font-medium text-white mb-1">Note on Cached Files:</p>
-            Clearing temporary image cache will free local device space. Your saved scan assessments in History will remain preserved.
+            Clear saved photos from this phone to free space. Your scan history will stay.
           </div>
           <div className="w-full flex flex-col gap-2.5">
             <button
@@ -107,14 +107,14 @@ export const GlobalModals: React.FC = () => {
           </div>
           <h2 className="text-lg font-bold mb-2">Couldn't complete action</h2>
           <p className="text-xs text-[#D1D5DB] leading-relaxed mb-6">
-            Couldn't save your assessment. Your phone storage is full or the connection dropped unexpectedly. Don't worry, your photo is safely kept in memory.
+            We could not save this crop check. Your phone may be full or your connection may have stopped. Your photo is still here.
           </p>
           <div className="w-full flex flex-col gap-2.5">
             <button
               onClick={() => setActiveModal(null)}
               className="w-full py-3.5 rounded-xl bg-[#176B45] hover:bg-[#1eb968] font-semibold text-sm transition"
             >
-              Retry Saving Assessment
+              Try saving again
             </button>
             <button
               onClick={() => setActiveModal(null)}

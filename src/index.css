@@ -38,6 +38,21 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+@keyframes farm-guide-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+.farm-guide-progress {
+  animation: farm-guide-progress 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .farm-guide-progress {
+    animation-duration: 2.8s;
+  }
+}
+
 /* Custom scrollbar for clean mobile feel */
 ::-webkit-scrollbar {
   width: 4px;

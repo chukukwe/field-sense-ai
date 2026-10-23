@@ -23,6 +23,7 @@ import { usePidginAssessment } from '../data/usePidginAssessment';
 import { useAssessmentProgress } from '../hooks/useAssessmentProgress';
 import { AssessmentProgressIndicator } from '../components/common/AssessmentProgressIndicator';
 import { PidginAssessmentControls } from '../components/common/PidginAssessmentControls';
+import { canOfferSampleCropResult } from '../data/sampleCropResults';
 
 type AssessmentVariant = 'single' | 'multiple' | 'unidentified' | 'unclear' | 'offline';
 
@@ -148,11 +149,14 @@ export const CropAssessmentScreen: React.FC = () => {
       const message = error instanceof Error ? error.message : 'The assessment could not be completed. You can retry this scan.';
       setRetryError(message);
       if (error instanceof AssessmentRequestError && error.code === 'ALREADY_PROCESSING') {
-        applyAssessment(scan.id, undefined, 'processing', 'This scan is still being assessed. Its result will appear after processing finishes.');
+                applyAssessment(scan.id, undefined, 'processing', 'Your crop is still being checked. Its result will appear here when ready.');
         setIsRetrying(false);
         return;
       }
-      await markScanFailed(scan.id, message);
+      const failure = error instanceof AssessmentRequestError && error.status !== undefined
+        ? { code: error.code, status: error.status }
+        : undefined;
+      await markScanFailed(scan.id, message, failure);
     } finally {
       assessmentProgress.stop();
       retryInFlightRef.current = false;
@@ -170,7 +174,7 @@ export const CropAssessmentScreen: React.FC = () => {
       <div className="flex flex-col gap-4 pb-8">
         <TopHeader
           variant="detail"
-          title="Crop Assessment"
+          title="Crop check"
           showHelp
           onBack={() => navigate('/')}
         />
@@ -178,14 +182,14 @@ export const CropAssessmentScreen: React.FC = () => {
           <div className="bg-[#292C2A] border border-[#323633] rounded-2xl p-5">
             <h2 className="text-base font-bold text-white">Scan not found</h2>
             <p className="text-xs text-[#D1D5DB] leading-relaxed mt-2">
-              This scan is not available in your account. No assessment result can be shown.
+              This scan is not in your account. No result can be shown.
             </p>
           </div>
           <button
             onClick={() => navigate('/history')}
             className="bg-[#176B45] hover:bg-[#1eb968] text-white py-3 rounded-xl text-xs font-semibold cursor-pointer transition"
           >
-            View History
+            Scan history
           </button>
         </div>
       </div>
@@ -202,19 +206,21 @@ export const CropAssessmentScreen: React.FC = () => {
       || scan.assessmentStatus === 'unavailable'
       || technicalFailure
       || scan.assessmentStatus === 'processing';
+    const canViewSample = technicalFailure && !scan.assessment && !scan.diagnosis
+      && canOfferSampleCropResult(scan.assessmentFailure, scan.cropType);
     return (
       <div className="flex flex-col gap-4 pb-8">
         <TopHeader
           variant="detail"
-          title="Crop Assessment"
+          title="Crop check"
           showHelp
           onBack={() => navigate('/')}
         />
         <div className="px-4 flex flex-col gap-4">
           <div className={`${assessment?.status === 'completed' ? 'bg-[#1F2B25] border-[#176B45]' : 'bg-[#2E2319] border-[#B36A2D]'} border rounded-2xl p-5 flex flex-col gap-3`}>
             <h2 className="text-base font-bold text-white">
-              {assessment ? (assessment.status === 'inconclusive' ? 'Assessment inconclusive' : 'Crop assessment')
-                : waiting ? 'Assessment in progress' : technicalFailure ? 'Assessment could not be completed' : 'Assessment unavailable'}
+              {assessment ? (assessment.status === 'inconclusive' ? 'Not sure yet' : 'Crop check')
+                : waiting ? 'Checking your crop' : technicalFailure ? 'Crop check could not finish' : 'Crop check unavailable'}
             </h2>
             <p className="text-xs text-[#D1D5DB] leading-relaxed">
               {assessment?.summary ?? scan.summary}
@@ -226,38 +232,44 @@ export const CropAssessmentScreen: React.FC = () => {
             {assessment && <>
               <PidginAssessmentControls language={language} onLanguageChange={setLanguage} loading={translationLoading} error={translationError}
                 text={language === 'pidgin' && translated ? [assessment.summary, assessment.confidenceReason, ...assessment.observedSymptoms, ...assessment.possibleCauses.flatMap((cause) => [cause.name, cause.explanation]), ...assessment.recommendedActions, ...assessment.preventionTips, assessment.whenToSeekHelp, ...assessment.limitations, assessment.disclaimer].join('. ') : ''} />
-              <p className="text-[11px] text-[#A1A7A3]">Selected crop: <span className="text-white">{scan.customCropName || scan.cropType}</span> · How sure: <span className="text-white">{simpleConfidence(assessment.confidence)}</span></p>
+              <p className="text-[11px] text-[#A1A7A3]">Crop: <span className="text-white">{scan.customCropName || scan.cropType}</span> · How sure: <span className="text-white">{simpleConfidence(assessment.confidence)}</span></p>
               <p className="text-[11px] text-[#A1A7A3]">{assessment.confidenceReason}</p>
               {!!assessment.observedSymptoms.length && <div>
                 <h3 className="text-xs font-bold text-white mb-1">Visible observations</h3>
                 <ul className="list-disc pl-4 text-xs text-[#D1D5DB] space-y-1">{assessment.observedSymptoms.map((symptom, index) => <li key={`${index}-${symptom}`}>{symptom}</li>)}</ul>
               </div>}
               {!!assessment.possibleCauses.length && <div>
-                <h3 className="text-xs font-bold text-white mb-1">Possible causes to consider</h3>
+                <h3 className="text-xs font-bold text-white mb-1">What may be wrong</h3>
                 <div className="flex flex-col gap-2">{assessment.possibleCauses.map((cause, index) => <div key={`${index}-${cause.name}`} className="bg-[#383B39] p-3 rounded-xl">
                   <p className="text-xs font-bold text-white">{cause.name} <span className="text-[#FF8A32] font-medium">· {simpleLikelihood(cause.likelihood)}</span></p>
                   <p className="text-[11px] text-[#D1D5DB] mt-1 leading-relaxed">{cause.explanation}</p>
                 </div>)}</div>
               </div>}
-              {[['Recommended next steps', assessment.recommendedActions], ['Prevention', assessment.preventionTips], ['Limitations', assessment.limitations]].map(([heading, items]) => (
+              {[['What to do next', assessment.recommendedActions], ['How to stop it spreading', assessment.preventionTips], ['What this photo cannot show', assessment.limitations]].map(([heading, items]) => (
                 <div key={heading as string}>
                   <h3 className="text-xs font-bold text-white mb-1">{heading as string}</h3>
                   <ul className="list-disc pl-4 text-xs text-[#D1D5DB] space-y-1">{(items as string[]).map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul>
                 </div>
               ))}
               <div className="bg-[#383B39] rounded-xl p-3">
-                <h3 className="text-xs font-bold text-white mb-1">When to seek help</h3>
+                <h3 className="text-xs font-bold text-white mb-1">When to ask for help</h3>
                 <p className="text-xs text-[#D1D5DB] leading-relaxed">{assessment.whenToSeekHelp}</p>
               </div>
               <p className="text-[10px] leading-relaxed text-[#A1A7A3]">{assessment.disclaimer}</p>
             </>}
-            {canStartOrRetry && canRequestAssessmentRetry(scan, Boolean(user), false) && <button
+            {canStartOrRetry && !canViewSample && canRequestAssessmentRetry(scan, Boolean(user), false) && <button
               onClick={() => void retryAssessment()}
               disabled={isRetrying}
               className="w-full bg-[#176B45] hover:bg-[#1eb968] disabled:opacity-60 text-white py-3 rounded-xl text-xs font-semibold cursor-pointer transition"
-            >{isRetrying ? 'Requesting assessment…' : technicalFailure ? 'Retry assessment' : scan.assessmentStatus === 'processing' ? 'Check assessment' : 'Start assessment'}</button>}
+            >{isRetrying ? 'Checking your crop…' : technicalFailure ? 'Try again' : scan.assessmentStatus === 'processing' ? 'Check again' : 'Check crop'}</button>}
+            {canViewSample && <div className="rounded-xl border border-[#5C3A1E] bg-[#2E2319] p-3">
+              <p className="text-xs font-semibold text-[#FFD29D]">Crop check is unavailable right now.</p>
+              <p className="mt-1 text-xs leading-relaxed text-[#F2D1AE]">We can show you an example result while you wait.</p>
+              <button type="button" onClick={() => navigate('/sample-result', { state: { scanId: scan.id, source: 'assessment', cropType: scan.cropType, failure: scan.assessmentFailure } })} className="mt-3 w-full rounded-xl bg-[#176B45] py-3 text-xs font-semibold text-white transition hover:bg-[#1eb968]">View sample result</button>
+              <button type="button" onClick={() => navigate('/')} className="mt-2 w-full rounded-xl bg-[#292C2A] py-3 text-xs font-semibold text-white transition hover:bg-[#343835]">Try again later</button>
+            </div>}
             {isRetrying && <AssessmentProgressIndicator progress={assessmentProgress.progress} message={assessmentProgress.message} />}
-            {retryError && <p role="alert" className="text-xs text-[#FFB4A8]">{retryError}</p>}
+            {retryError && retryError !== scan.summary && <p role="alert" className="text-xs text-[#FFB4A8]">{retryError}</p>}
           </div>
           <div className="grid grid-cols-2 gap-2.5">
             <button

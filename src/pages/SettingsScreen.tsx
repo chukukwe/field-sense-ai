@@ -37,7 +37,7 @@ export const SettingsScreen: React.FC = () => {
       setInstallPrompt(null);
     } else {
       alert(
-        'To install FieldVoice AI PWA:\n1. Tap your browser menu (: or Share)\n2. Select "Install app" or "Add to Home screen"'
+        'To install FarmPal:\n1. Open your browser menu.\n2. Tap “Install app” or “Add to Home screen”.'
       );
     }
   };
@@ -52,22 +52,22 @@ export const SettingsScreen: React.FC = () => {
       />
 
       <div className="px-4 flex flex-col gap-4">
-        {/* Card 1: Install FieldVoice PWA */}
+        {/* Card 1: Install FarmPal */}
         <div className="bg-[#1F2B25] rounded-2xl p-4 border border-[#273B30] flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-[#292C2A] flex items-center justify-center text-gray-200 shrink-0">
                 <Download className="w-5 h-5 text-gray-200" />
               </div>
-              <h3 className="text-sm font-bold text-white">Install FieldVoice</h3>
+              <h3 className="text-sm font-bold text-white">Install FarmPal</h3>
             </div>
             <span className="bg-[#353526] text-[#FF8A32] text-[11px] font-semibold px-2.5 py-1 rounded-full">
-              Field PWA
+              FarmPal app
             </span>
           </div>
 
           <p className="text-xs text-[#D1D5DB] leading-relaxed">
-            Add to your Android home screen for instant camera access and offline review in the field.
+            Add FarmPal to your home screen for quick access in the field.
           </p>
 
           <button
@@ -75,7 +75,7 @@ export const SettingsScreen: React.FC = () => {
             className="w-full bg-[#176B45] hover:bg-[#1eb968] active:scale-[0.98] transition-all text-white font-semibold text-xs py-3.5 rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-sm"
           >
             <Download className="w-4 h-4" />
-            <span>{installSuccess ? 'App Installed!' : 'Install Field Voice AI'}</span>
+            <span>{installSuccess ? 'FarmPal is installed' : 'Install FarmPal'}</span>
           </button>
 
         </div>
@@ -89,7 +89,7 @@ export const SettingsScreen: React.FC = () => {
 
           <div>
             <label className="text-xs text-[#D1D5DB] block mb-2 font-medium">
-              Preferred Language
+              Language
             </label>
             <div className="relative">
               <select

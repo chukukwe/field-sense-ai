@@ -8,6 +8,7 @@ const navigationItems = [
   { label: 'Home', path: '/' },
   { label: 'Scan a crop', path: '/scan' },
   { label: 'Scan history', path: '/history' },
+  { label: 'Farm Guide', path: '/farm-guide' },
   { label: 'Profile', path: '/profile' },
 ];
 
@@ -36,7 +37,7 @@ export const NavigationMenuButton: React.FC<{ compact?: boolean }> = ({ compact 
     };
   }, [isOpen]);
 
-  const showMenu = ['/', '/scan', '/history', '/profile'].includes(location.pathname);
+  const showMenu = ['/', '/scan', '/history', '/profile', '/farm-guide', '/farm-guide/area'].includes(location.pathname);
   if (!showMenu) return null;
 
   const buttonSize = compact ? 'w-10 h-10' : 'w-11 h-11';

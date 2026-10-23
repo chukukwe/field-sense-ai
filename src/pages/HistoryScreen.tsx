@@ -66,8 +66,8 @@ export const HistoryScreen: React.FC = () => {
     <div className="flex flex-col gap-4 pb-4">
       <TopHeader
         variant="page"
-        title="Scan History"
-        subtitle="Review your previous crop assessments."
+        title="Crop check history"
+        subtitle="See your earlier crop checks."
       />
 
       <div className="px-4 flex flex-col gap-4">
@@ -111,7 +111,7 @@ export const HistoryScreen: React.FC = () => {
             </div>
             <h4 className="text-base font-bold text-white mb-2">No scans yet</h4>
             <p className="text-xs text-[#D1D5DB] leading-relaxed mb-6 max-w-[260px]">
-              Your saved crop assessments will appear here after you scan an affected plant.
+              Your saved crop checks will appear here after your first scan.
             </p>
             <button
               onClick={() => navigate('/scan')}

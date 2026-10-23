@@ -50,8 +50,8 @@ export const ProfileScreen: React.FC = () => {
     <div className="flex flex-col gap-4 pb-4">
       <TopHeader
         variant="page"
-        title="Field Profile"
-        subtitle="Manage your scout details and farm preferences."
+        title="Your profile"
+        subtitle="Update your name and farm area."
       />
 
       <div className="px-4 flex flex-col gap-4">

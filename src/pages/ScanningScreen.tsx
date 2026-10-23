@@ -4,7 +4,7 @@ import { Repeat, Trash2, Radio } from 'lucide-react';
 import { TopHeader } from '../components/common/TopHeader';
 import { useApp } from '../context/useApp';
 import { getScanPhoto, saveScanPhoto } from '../data/photoStore';
-import { requestCropAssessment } from '../data/assessmentApi';
+import { AssessmentRequestError, requestCropAssessment } from '../data/assessmentApi';
 import { useAssessmentProgress } from '../hooks/useAssessmentProgress';
 import { AssessmentProgressIndicator } from '../components/common/AssessmentProgressIndicator';
 import { useAuth } from '../context/useAuth';
@@ -111,7 +111,10 @@ export const ScanningScreen: React.FC = () => {
                 await completeProgress();
               } catch (error) {
                 stopProgress();
-                await markScanFailed(scan.id, error instanceof Error ? error.message : 'The assessment could not be completed. You can retry this scan.');
+                const failure = error instanceof AssessmentRequestError && error.status !== undefined
+                  ? { code: error.code, status: error.status }
+                  : undefined;
+                await markScanFailed(scan.id, error instanceof Error ? error.message : 'The assessment could not be completed. You can retry this scan.', failure);
               }
 
               // The assessment request creates the authenticated user's scan
@@ -147,8 +150,8 @@ export const ScanningScreen: React.FC = () => {
     <div className="flex flex-col gap-4 pb-4">
       <TopHeader
         variant="page"
-        title="Scan a Crop"
-        subtitle="Take a photo of the affected plant so we can help you investigate."
+        title="Checking your crop"
+        subtitle="Getting your crop photo ready."
       />
 
       <div className="px-4 flex flex-col gap-4">
@@ -202,10 +205,10 @@ export const ScanningScreen: React.FC = () => {
             <h3 className="text-sm font-bold text-white">
               What crop is affected? <span className="text-[#E04141]">*</span>
             </h3>
-            <span className="text-xs font-semibold text-[#FF8A32]">Select 1</span>
+            <span className="text-xs font-semibold text-[#FF8A32]">One crop</span>
           </div>
           <p className="text-[11px] text-[#8F9490] mb-3">
-            Tuned for Akwa Ibom and Niger Delta coastal agricultural belts.
+            Checking the crop you selected.
           </p>
           <div className="grid grid-cols-2 gap-2.5">
             <div className="p-3 rounded-xl bg-[#174D38] border border-[#22C55E] text-white">
@@ -250,7 +253,7 @@ export const ScanningScreen: React.FC = () => {
           Analyzing Crop…
         </button>
         <p className="text-[11px] text-[#8F9490] text-center -mt-2">
-          AI results are guidance, not a confirmed diagnosis.
+          The result may be wrong. Ask a local farm adviser if you are unsure.
         </p>
       </div>
     </div>

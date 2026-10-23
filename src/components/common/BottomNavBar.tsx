@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, Camera, Clock, User } from 'lucide-react';
+import { Home, Camera, Clock, User, Sprout } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 export const BottomNavBar: React.FC = () => {
@@ -10,6 +10,7 @@ export const BottomNavBar: React.FC = () => {
     { label: 'Home', path: '/', icon: Home },
     { label: 'Scan', path: '/scan', icon: Camera },
     { label: 'History', path: '/history', icon: Clock },
+    { label: 'Farm Guide', path: '/farm-guide', icon: Sprout },
     { label: 'Profile', path: '/profile', icon: User },
   ];
 

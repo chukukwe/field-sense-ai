@@ -116,6 +116,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           // it must survive the server-created cloud metadata record.
           photoStorageKey: localScan.photoStorageKey ?? cloudScan.photoStorageKey,
           photoScope: cloudScan.photoScope ?? localScan.photoScope,
+          assessmentFailure: localScan.assessmentFailure ?? cloudScan.assessmentFailure,
         };
       });
       const localOnlyScans = localScans.filter((scan) => scan.dataScope === 'local-only' && !cloudScans.some((cloudScan) => cloudScan.id === scan.id));
@@ -152,27 +153,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return 'local-only';
   }, [scansStorageKey]);
 
-  const applyAssessment = useCallback((scanId: string, assessment: CropAssessment | undefined, status: NonNullable<ScanItem['assessmentStatus']>, summary?: string) => {
+  const applyAssessment = useCallback((scanId: string, assessment: CropAssessment | undefined, status: NonNullable<ScanItem['assessmentStatus']>, summary?: string, failure?: ScanItem['assessmentFailure']) => {
     setScans((previous) => previous.map((scan) => scan.id !== scanId ? scan : {
       ...scan,
       ...(assessment ? { assessment } : {}),
       assessmentStatus: status,
+      assessmentFailure: status === 'failed' ? failure : undefined,
       ...(summary ? { summary } : {}),
       footerIcon: status === 'completed' ? 'check' : status === 'inconclusive' || status === 'failed' || status === 'unavailable' ? 'alert' : 'clock',
-      footerStatus: status === 'completed' ? 'Assessment ready'
-        : status === 'inconclusive' ? 'Assessment inconclusive'
-          : status === 'processing' ? 'Analysis in progress'
-            : status === 'pending' ? 'Assessment pending'
-              : status === 'unavailable' ? 'Assessment unavailable' : 'Analysis failed',
-      footerActionLabel: status === 'failed' ? 'Retry assessment' : 'View assessment',
+      footerStatus: status === 'completed' ? 'Crop check ready'
+        : status === 'inconclusive' ? 'Not sure yet'
+          : status === 'processing' ? 'Checking crop'
+            : status === 'pending' ? 'Ready to check'
+              : status === 'unavailable' ? 'Crop check unavailable' : 'Could not check',
+      footerActionLabel: status === 'failed' ? 'Try again' : 'See result',
     }));
   }, []);
 
-  const markScanFailed = useCallback(async (scanId: string, summary: string) => {
+  const markScanFailed = useCallback(async (scanId: string, summary: string, failure?: ScanItem['assessmentFailure']) => {
     // Keep UI recovery local and immediate. The backend owns cloud assessment
     // state; a queued client update could hang offline or overwrite a result
     // that completed after the browser stopped waiting.
-    applyAssessment(scanId, undefined, 'failed', summary);
+    applyAssessment(scanId, undefined, 'failed', summary, failure);
   }, [applyAssessment]);
 
   const deleteScan = useCallback(async (id: string): Promise<boolean> => {
@@ -276,10 +278,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       date: formatScanDate(new Date()),
       status: 'Observation',
       statusVariant: 'amber',
-      summary: 'No AI assessment has been produced yet.',
+      summary: 'No crop check yet.',
       footerIcon: 'clock',
-      footerStatus: 'Analysing…',
-      footerActionLabel: 'View Assessment',
+      footerStatus: 'Checking crop…',
+      footerActionLabel: 'See result',
       imageUrl: previewUrl,
       photoStorageKey: scanDraft.photoFile ? `${uid}/${id}` : undefined,
       assessmentStatus: 'pending',

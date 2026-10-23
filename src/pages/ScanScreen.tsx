@@ -168,8 +168,8 @@ export const ScanScreen: React.FC = () => {
     <div className="flex flex-col gap-4 pb-6">
       <TopHeader
         variant="page"
-        title="Scan a Crop"
-        subtitle="Take a photo of the affected plant so we can help you investigate."
+        title="Check a crop"
+        subtitle="Take a photo or choose one from your phone."
       />
 
       <div className="px-4 flex flex-col gap-4">
@@ -179,9 +179,9 @@ export const ScanScreen: React.FC = () => {
           <div className="bg-[#2C1A1A] border border-[#5C2020] rounded-2xl p-4 flex gap-3 animate-in fade-in slide-in-from-top-2 duration-150">
             <AlertOctagon className="w-5 h-5 text-[#E04141] shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-bold text-[#E04141]">Crop selection required</p>
+              <p className="text-sm font-bold text-[#E04141]">Choose a crop</p>
               <p className="text-xs text-[#E04141]/80 mt-0.5 leading-snug">
-                Please select the affected crop type below before running the AI assessment
+                Choose the crop you want to check.
               </p>
             </div>
           </div>
@@ -248,9 +248,9 @@ export const ScanScreen: React.FC = () => {
               <Camera className="w-7 h-7" />
             </div>
             <div>
-              <h4 className="text-sm font-bold text-white mb-1">Camera Access Blocked</h4>
+              <h4 className="text-sm font-bold text-white mb-1">Camera not available</h4>
               <p className="text-xs text-[#D1D5DB] leading-relaxed">
-                FieldVoice AI needs camera permission to photograph affected crop leaves directly in the field.
+                FarmPal needs camera access to take a photo here.
               </p>
             </div>
             <div className="bg-[#383B39] rounded-xl p-3.5 text-left w-full">
@@ -295,7 +295,7 @@ export const ScanScreen: React.FC = () => {
                 className="w-full bg-[#27332D] hover:bg-[#32423A] active:scale-[0.98] transition text-[#FF8A32] font-semibold text-xs py-3 rounded-xl flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Upload className="w-4 h-4" />
-                Upload Photo
+                Choose photo
               </button>
             </div>
           </div>
@@ -336,10 +336,10 @@ export const ScanScreen: React.FC = () => {
             <h3 className="text-sm font-bold text-white">
               What crop is affected? <span className="text-[#E04141]">*</span>
             </h3>
-            <span className="text-xs font-semibold text-[#FF8A32]">Select 1</span>
+            <span className="text-xs font-semibold text-[#FF8A32]">Choose one</span>
           </div>
           <p className="text-[11px] text-[#8F9490] mb-3 leading-snug">
-            Tuned for Akwa Ibom and Niger Delta coastal agricultural belts.
+            Choose the crop shown in your photo.
           </p>
 
           <div className="grid grid-cols-2 gap-2">
@@ -372,7 +372,7 @@ export const ScanScreen: React.FC = () => {
               placeholder="Type the name of your crop"
               className="mt-2 w-full rounded-xl border border-[#3B423E] bg-[#181B19] px-3 py-3 text-xs text-white placeholder:text-[#8F9490] focus:border-[#176B45] focus:outline-none" />
             {errorBanner === 'custom-name-required' && <span role="alert" className="mt-1 block text-[11px] text-[#FFB4A8]">Enter a crop name to continue.</span>}
-            {errorBanner === 'custom-name-invalid' && <span role="alert" className="mt-1 block text-[11px] text-[#FFB4A8]">Use a crop name of up to 80 characters without angle brackets or control characters.</span>}
+            {errorBanner === 'custom-name-invalid' && <span role="alert" className="mt-1 block text-[11px] text-[#FFB4A8]">Use 1–80 characters. Do not use &lt; or &gt;.</span>}
           </label>}
         </div>
 
@@ -419,10 +419,10 @@ export const ScanScreen: React.FC = () => {
             onClick={handleAnalyze}
             className="w-full bg-[#176B45] hover:bg-[#1eb968] active:scale-[0.98] transition text-white font-semibold text-sm py-3.5 rounded-xl cursor-pointer shadow-md"
           >
-            Analyze Crop
+            Check crop
           </button>
           <p className="text-[11px] text-[#8F9490] text-center">
-            AI results are guidance, not a confirmed diagnosis.
+            The result may be wrong. Ask a local farm adviser if you are unsure.
           </p>
         </div>
 
@@ -440,7 +440,7 @@ export const ScanScreen: React.FC = () => {
             </div>
             <h2 className="text-lg font-bold mb-2">Leave this scan?</h2>
             <p className="text-xs text-[#D1D5DB] leading-relaxed mb-6">
-              Your current scan has not been saved. If you leave, you may lose this assessment.
+              This scan is not saved yet. If you leave, you may lose it.
             </p>
             <div className="w-full flex flex-col gap-2.5">
               <button

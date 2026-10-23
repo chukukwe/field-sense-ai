@@ -125,9 +125,9 @@ export const AuthScreen: React.FC = () => {
       <section className="w-full max-w-[390px]">
         <div className="flex flex-col items-center text-center mb-7">
           <div className="w-14 h-14 rounded-2xl bg-[#176B45] flex items-center justify-center shadow-lg shadow-green-950/40 mb-3"><Leaf className="w-7 h-7 text-white" /></div>
-          <p className="text-xs font-bold tracking-[0.18em] text-[#22C55E] uppercase">FieldVoice AI</p>
+          <p className="text-xs font-bold tracking-[0.18em] text-[#22C55E] uppercase">FarmPal</p>
           <h1 className="text-2xl font-extrabold tracking-tight mt-2">{heading}</h1>
-          <p className="text-sm text-[#A1A7A3] mt-2 leading-relaxed">{mode === 'create-account' ? 'Create a secure account to keep your field scans together.' : mode === 'forgot-password' ? 'We’ll email you a secure link to choose a new password.' : 'Sign in to continue to your crop-health assistant.'}</p>
+          <p className="text-sm text-[#A1A7A3] mt-2 leading-relaxed">{mode === 'create-account' ? 'Create an account to keep your crop checks together.' : mode === 'forgot-password' ? 'We’ll email you a link to reset your password.' : 'Sign in to check your crops.'}</p>
         </div>
 
         <div className="bg-[#202321] rounded-2xl border border-[#323633] p-5 shadow-xl">
@@ -147,7 +147,7 @@ export const AuthScreen: React.FC = () => {
           </form>
 
           <div className="mt-5 text-center text-xs text-[#A1A7A3]">
-            {mode === 'sign-in' ? <>New to FieldVoice? <Link to={modeLink('create-account')} className="font-bold text-[#22C55E] hover:underline">Create account</Link></> : mode === 'create-account' ? <>Already registered? <Link to={modeLink('sign-in')} className="font-bold text-[#22C55E] hover:underline">Sign in</Link></> : <Link to={modeLink('sign-in')} className="inline-flex items-center gap-1.5 font-bold text-[#22C55E] hover:underline"><ArrowLeft className="w-3.5 h-3.5" /> Back to sign in</Link>}
+            {mode === 'sign-in' ? <>New to FarmPal? <Link to={modeLink('create-account')} className="font-bold text-[#22C55E] hover:underline">Create account</Link></> : mode === 'create-account' ? <>Already registered? <Link to={modeLink('sign-in')} className="font-bold text-[#22C55E] hover:underline">Sign in</Link></> : <Link to={modeLink('sign-in')} className="inline-flex items-center gap-1.5 font-bold text-[#22C55E] hover:underline"><ArrowLeft className="w-3.5 h-3.5" /> Back to sign in</Link>}
           </div>
         </div>
         <p className="text-center text-[11px] text-[#626862] mt-5">Your scan details are private to your account.</p>

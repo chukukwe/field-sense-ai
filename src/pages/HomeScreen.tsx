@@ -10,6 +10,7 @@ import {
   Sun,
   Check,
   Image as ImageIcon,
+  Sprout,
 } from 'lucide-react';
 import { TopHeader } from '../components/common/TopHeader';
 import { ScanImage } from '../components/common/ScanImage';
@@ -74,17 +75,23 @@ export const HomeScreen: React.FC = () => {
               className="mt-4 w-full bg-[#176B45] hover:bg-[#1eb968] active:scale-[0.98] transition text-white font-semibold text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-md cursor-pointer"
             >
               <Camera className="w-4 h-4" />
-              Scan a Crop
+              Check a crop
             </button>
           </div>
         </div>
+
+        <button type="button" aria-label="Open Farm Guide to see your crop plan" onClick={() => navigate('/farm-guide')} className="flex items-center gap-3 rounded-2xl border border-[#286446] bg-gradient-to-r from-[#1B4733] to-[#292C2A] p-4 text-left transition hover:border-[#1EB968] hover:shadow-[0_0_18px_rgba(30,185,104,0.12)]">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#174D38] text-[#A7F3D0]"><Sprout className="h-5 w-5" aria-hidden="true" /></span>
+          <span className="min-w-0 flex-1"><span className="block text-sm font-bold text-white">Farm Guide</span><span className="mt-0.5 block text-xs text-[#D1D5DB]">See your farming zone and crop calendar.</span></span>
+          <span className="flex shrink-0 items-center gap-1 rounded-lg bg-[#176B45] px-2.5 py-2 text-[10px] font-bold text-white sm:px-3 sm:text-xs">See plan</span>
+        </button>
 
         {/* ── Recent Scans Section ── */}
         <div className="flex flex-col gap-3">
           {/* Section header */}
           <div className="flex items-center justify-between pt-1">
             <span className="text-sm font-bold text-white">
-              Recent Scans ({recentScans.length})
+              Recent crop checks ({recentScans.length})
             </span>
             <button
               onClick={() => navigate('/history')}
@@ -102,13 +109,13 @@ export const HomeScreen: React.FC = () => {
               </div>
               <h4 className="text-sm font-bold text-white mb-1">Your field history starts here</h4>
               <p className="text-xs text-[#A1A7A3] mb-4 max-w-[230px] leading-relaxed">
-                Your crop assessments will appear here after your first scan
+                Your crop checks will appear here after your first scan.
               </p>
               <button
                 onClick={() => navigate('/scan')}
                 className="bg-[#176B45] hover:bg-[#1eb968] text-white px-5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer shadow-md"
               >
-                Scan your first crop
+                Check your first crop
               </button>
             </div>
           )}
@@ -167,7 +174,7 @@ export const HomeScreen: React.FC = () => {
           <Sun className="w-5 h-5 text-[#FF8A32] mb-2" />
           <h4 className="text-sm font-bold text-white">For a better scan</h4>
           <p className="text-xs text-[#D1D5DB] mt-1 leading-relaxed">
-            Follow these practical steps outdoors to ensure the diagnostic model detects symptoms accurately.
+            Take a clear photo so we can see the leaves.
           </p>
 
           <ul className="mt-3 space-y-2">

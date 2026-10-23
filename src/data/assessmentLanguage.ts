@@ -1,8 +1,8 @@
 import type { CropAssessment } from '../types';
 
 export function simpleConfidence(value: CropAssessment['confidence']): string {
-  if (value === 'moderate') return 'Medium';
-  return value === 'high' ? 'High' : 'Low';
+  if (value === 'moderate') return 'Somewhat sure';
+  return value === 'high' ? 'More sure' : 'Not sure yet';
 }
 
 export function simpleLikelihood(value: CropAssessment['possibleCauses'][number]['likelihood']): string {

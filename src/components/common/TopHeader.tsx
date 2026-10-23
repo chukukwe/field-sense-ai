@@ -27,10 +27,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
       <header className="relative z-40 px-4 pt-5 pb-3 flex items-center justify-between">
         <div>
           <h1 className="text-[22px] font-bold tracking-tight text-white leading-tight">
-            FieldVoice AI
+            FarmPal
           </h1>
           <p className="text-[13px] text-[#A1A7A3] mt-0.5 font-normal">
-            Your crop-health assistant
+            Crop help for your farm
           </p>
         </div>
         <NavigationMenuButton />

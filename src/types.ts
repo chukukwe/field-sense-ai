@@ -22,6 +22,8 @@ export interface ScanItem {
   photoScope?: 'cloud' | 'local-only' | 'missing';
   dataScope?: 'cloud' | 'local-only';
   assessmentStatus?: 'pending' | 'processing' | 'completed' | 'inconclusive' | 'unavailable' | 'failed';
+  /** Local-only failure metadata used to offer the prepared sample result safely. */
+  assessmentFailure?: { code: string; status: number };
   assessment?: CropAssessment;
   processingStartedAt?: { toDate: () => Date } | Date | string;
   imageSizeMb?: number;

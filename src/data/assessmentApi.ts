@@ -3,12 +3,14 @@ import type { CropAssessment, CropType } from '../types.js';
 export class AssessmentRequestError extends Error {
   readonly code: string;
   readonly retryable: boolean;
+  readonly status?: number;
 
-  constructor(message: string, code: string, retryable: boolean) {
+  constructor(message: string, code: string, retryable: boolean, status?: number) {
     super(message);
     this.name = 'AssessmentRequestError';
     this.code = code;
     this.retryable = retryable;
+    this.status = status;
   }
 }
 
@@ -36,7 +38,7 @@ export async function requestCropAssessment(input: {
       body: form,
     });
   } catch {
-    throw new AssessmentRequestError('Could not reach the assessment service. Check your connection and try again.', 'NETWORK_ERROR', true);
+    throw new AssessmentRequestError('Could not reach the crop check service. Check your connection and try again.', 'NETWORK_ERROR', true);
   }
 
   const body: unknown = await response.json().catch(() => null);
@@ -48,12 +50,12 @@ export async function requestCropAssessment(input: {
     const message = typeof error?.message === 'string'
       ? error.message
       : response.status === 408 || response.status === 504
-        ? 'The assessment service took too long to respond. Your scan is saved; you can retry this assessment.'
+        ? 'The crop check took too long. Your scan is saved. Try again later.'
         : response.status === 429
-          ? 'The assessment service is at its request limit. Wait a little, then retry this scan.'
+          ? 'The crop check is busy right now. Wait a little, then try again.'
           : response.status === 503
-            ? 'The assessment service is temporarily unavailable. Your scan is saved; you can retry later.'
-            : 'The assessment service could not complete this request.';
+            ? 'The crop check is not available right now. Your scan is saved. Try again later.'
+            : 'The crop check could not finish. Try again later.';
     const code = typeof error?.code === 'string'
       ? error.code
       : response.status === 408 || response.status === 504
@@ -66,14 +68,14 @@ export async function requestCropAssessment(input: {
     const retryable = error && 'retryable' in error
       ? error.retryable === true
       : response.status === 408 || response.status === 429 || response.status === 503 || response.status === 504;
-    throw new AssessmentRequestError(message, code, retryable);
+    throw new AssessmentRequestError(message, code, retryable, response.status);
   }
 
   if (typeof body !== 'object' || body === null || !('assessment' in body)) {
-    throw new AssessmentRequestError('The assessment response was incomplete. You can retry this scan.', 'INVALID_RESPONSE', true);
+    throw new AssessmentRequestError('The crop check returned an incomplete result. Try again.', 'INVALID_RESPONSE', true);
   }
   if (!isCropAssessment(body.assessment)) {
-    throw new AssessmentRequestError('The assessment response could not be validated. You can retry this scan.', 'INVALID_RESPONSE', true);
+    throw new AssessmentRequestError('The crop check result could not be checked. Try again.', 'INVALID_RESPONSE', true);
   }
   return body.assessment;
 }

@@ -27,6 +27,13 @@ const { createRoot } = await import('react-dom/client');
 const { AssessmentProgressIndicator } = await viteServer.ssrLoadModule('/src/components/common/AssessmentProgressIndicator.tsx');
 const { useAssessmentProgress } = await viteServer.ssrLoadModule('/src/hooks/useAssessmentProgress.ts');
 const { requestCropAssessment } = await viteServer.ssrLoadModule('/src/data/assessmentApi.ts');
+const { SeasonSenseScreen } = await viteServer.ssrLoadModule('/src/pages/SeasonSenseScreen.tsx');
+const { FarmGuidePlanScreen } = await viteServer.ssrLoadModule('/src/pages/FarmGuidePlanScreen.tsx');
+const { SampleCropResultScreen } = await viteServer.ssrLoadModule('/src/pages/SampleCropResultScreen.tsx');
+const { CropAssessmentScreen } = await viteServer.ssrLoadModule('/src/pages/CropAssessmentScreen.tsx');
+const { AppContext } = await viteServer.ssrLoadModule('/src/context/AppContextStore.ts');
+const { AuthContext } = await viteServer.ssrLoadModule('/src/context/AuthContextStore.ts');
+const { MemoryRouter, Route, Routes } = await viteServer.ssrLoadModule('/node_modules/react-router-dom/dist/index.mjs');
 const { act, createElement, StrictMode, useEffect, useRef, useState } = React;
 
 const testInput = {
@@ -255,7 +262,7 @@ test('mounted failures stop below 100 for timeout, quota, unavailability, gatewa
     { name: '429', response: () => Response.json({ error: { code: 'GEMINI_QUOTA', message: 'Quota mock.', retryable: true } }, { status: 429 }), message: /Quota mock/ },
     { name: '503', response: () => Response.json({ error: { code: 'GEMINI_UNAVAILABLE', message: 'Unavailable mock.', retryable: true } }, { status: 503 }), message: /Unavailable mock/ },
     { name: '504', response: () => new Response('untrusted mock body', { status: 504 }), message: /took too long/i },
-    { name: 'malformed', response: () => Response.json({ assessment: { summary: 'incomplete' } }), message: /could not be validated|incomplete/i },
+    { name: 'malformed', response: () => Response.json({ assessment: { summary: 'incomplete' } }), message: /could not be checked|incomplete/i },
   ];
 
   for (const scenario of scenarios) {
@@ -364,6 +371,164 @@ test('unmounting clears the progress interval', async () => {
     globalThis.setInterval = originalSetInterval;
     globalThis.clearInterval = originalClearInterval;
     if (mount.host.isConnected) await mount.unmount();
+  }
+});
+
+test('Farm Guide selects an area, prepares its plan, and opens crop planting notes', async () => {
+  const appContext = { setHelpModalOpen() {}, scans: [] };
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => { fetchCalls += 1; throw new Error('Farm Guide must not call a service'); };
+  const mount = createMount(createElement(MemoryRouter, { initialEntries: ['/farm-guide'] },
+    createElement(AppContext.Provider, { value: appContext },
+      createElement(Routes, null,
+        createElement(Route, { path: '/farm-guide', element: createElement(SeasonSenseScreen) }),
+        createElement(Route, { path: '/farm-guide/plan', element: createElement(FarmGuidePlanScreen) }),
+      ))));
+  try {
+    await mount.render();
+    const selects = mount.host.querySelectorAll('select');
+    assert.equal(selects.length, 2);
+    assert.equal(selects[1].disabled, true);
+    const state = [...selects[0].options].find((option) => option.textContent === 'Akwa Ibom');
+    assert.ok(state);
+    await act(async () => {
+      selects[0].value = state.value;
+      selects[0].dispatchEvent(new browserWindow.Event('change', { bubbles: true }));
+    });
+    const eket = [...selects[1].options].find((option) => option.textContent === 'Eket');
+    assert.ok(eket);
+    await act(async () => {
+      selects[1].value = eket.value;
+      selects[1].dispatchEvent(new browserWindow.Event('change', { bubbles: true }));
+    });
+    assert.match(mount.host.textContent, /Estimated farming zone/);
+    assert.match(mount.host.textContent, /Mangrove \/ Freshwater Swamp/);
+    const seePlan = [...mount.host.querySelectorAll('button')].find((button) => button.textContent.trim() === 'See plan');
+    assert.ok(seePlan);
+    assert.equal(seePlan.disabled, false);
+    await act(async () => { seePlan.dispatchEvent(new browserWindow.MouseEvent('click', { bubbles: true })); });
+    assert.match(mount.host.textContent, /Putting your farm plan together/);
+    assert.doesNotMatch(mount.host.textContent, /Plant this month/);
+    await act(async () => delay(2_100));
+    assert.match(mount.host.textContent, /Eket, Akwa Ibom/);
+    assert.match(mount.host.textContent, /Mangrove \/ Freshwater Swamp/);
+    assert.match(mount.host.textContent, /Crop calendar/);
+    assert.match(mount.host.textContent, /Plant this month/);
+    assert.doesNotMatch(mount.host.textContent, /Draft/);
+    assert.doesNotMatch(mount.host.textContent, /not a live weather forecast/i);
+    const cassavaCard = [...mount.host.querySelectorAll('button')].find((button) => button.textContent.includes('Cassava'));
+    assert.ok(cassavaCard);
+    assert.equal(cassavaCard.querySelector('img')?.getAttribute('src'), '/assets/thumb-cassava.png');
+    await act(async () => { cassavaCard.dispatchEvent(new browserWindow.MouseEvent('click', { bubbles: true })); });
+    assert.match(mount.host.textContent, /How to plant/);
+    assert.match(mount.host.textContent, /stem cuttings/i);
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await mount.unmount();
+  }
+});
+
+test('sample result appears only for a matching failed scan and is not saved as an assessment', async () => {
+  const scan = {
+    id: 'scan-sample-test',
+    cropType: 'Cassava',
+    assessmentStatus: 'failed',
+    assessmentFailure: { code: 'GEMINI_TIMEOUT', status: 504 },
+  };
+  const appContext = { setHelpModalOpen() {}, scans: [scan] };
+  const state = { scanId: scan.id, source: 'assessment', cropType: scan.cropType, failure: scan.assessmentFailure };
+  const mount = createMount(createElement(MemoryRouter, { initialEntries: [{ pathname: '/sample-result', state }] },
+    createElement(AppContext.Provider, { value: appContext },
+      createElement(SampleCropResultScreen))));
+  try {
+    await mount.render();
+    assert.match(mount.host.textContent, /Sample result/);
+    assert.match(mount.host.textContent, /Sample result — this was not checked from your photo\./i);
+    assert.match(mount.host.textContent, /Dry, brown edges on cassava leaves/);
+    assert.equal(scan.assessment, undefined);
+  } finally {
+    await mount.unmount();
+  }
+});
+
+test('provider failure offers an explicit sample choice and the sample is not shown until selected', async () => {
+  const scan = {
+    id: 'scan-fallback-test',
+    cropType: 'Cassava',
+    assessmentStatus: 'failed',
+    assessmentFailure: { code: 'GEMINI_TIMEOUT', status: 504 },
+    summary: 'The crop check took too long. Your scan is saved. Try again later.',
+    imageUrl: '',
+    photoScope: 'local-only',
+  };
+  const appContext = {
+    setHelpModalOpen() {}, scans: [scan], resetScanDraft() {},
+    applyAssessment() {}, async markScanFailed() {},
+  };
+  const authContext = { user: null, fullName: '', loading: false, configured: false };
+  const mount = createMount(createElement(MemoryRouter, { initialEntries: [`/assessment/${scan.id}`] },
+    createElement(AppContext.Provider, { value: appContext },
+      createElement(AuthContext.Provider, { value: authContext },
+        createElement(Routes, null,
+          createElement(Route, { path: '/assessment/:id', element: createElement(CropAssessmentScreen) }),
+          createElement(Route, { path: '/sample-result', element: createElement(SampleCropResultScreen) }),
+          createElement(Route, { path: '/', element: createElement('p', { 'data-home': true }, 'FarmPal home') }),
+        )))));
+  try {
+    await mount.render();
+    assert.match(mount.host.textContent, /Crop check is unavailable right now\./);
+    assert.match(mount.host.textContent, /We can show you an example result while you wait\./);
+    assert.doesNotMatch(mount.host.textContent, /Dry, brown edges on cassava leaves/);
+    assert.equal([...mount.host.querySelectorAll('button')].some((button) => button.textContent.trim() === 'Try again'), false,
+      'a provider outage should present the requested sample-or-later choices');
+
+    const viewSample = [...mount.host.querySelectorAll('button')].find((button) => button.textContent.trim() === 'View sample result');
+    assert.ok(viewSample);
+    await act(async () => viewSample.dispatchEvent(new browserWindow.MouseEvent('click', { bubbles: true })));
+    assert.match(mount.host.textContent, /Sample result — this was not checked from your photo\./i);
+    assert.match(mount.host.textContent, /Dry, brown edges on cassava leaves/);
+    assert.equal(scan.assessment, undefined, 'opening a sample must not write an assessment to the scan');
+
+    const backToScan = [...mount.host.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Back to your scan');
+    assert.ok(backToScan);
+    await act(async () => backToScan.dispatchEvent(new browserWindow.MouseEvent('click', { bubbles: true })));
+    const later = [...mount.host.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Try again later');
+    assert.ok(later);
+    await act(async () => later.dispatchEvent(new browserWindow.MouseEvent('click', { bubbles: true })));
+    assert.match(mount.host.querySelector('[data-home]')?.textContent ?? '', /FarmPal home/);
+    assert.equal(scan.assessment, undefined);
+  } finally {
+    await mount.unmount();
+  }
+});
+
+test('a successful mocked scan result remains visible as a real assessment', async () => {
+  const scan = {
+    id: 'scan-real-result-test',
+    cropType: 'Cassava',
+    assessmentStatus: 'completed',
+    assessment: mockAssessment,
+    summary: mockAssessment.summary,
+    imageUrl: '',
+    photoScope: 'local-only',
+  };
+  const appContext = { setHelpModalOpen() {}, scans: [scan], resetScanDraft() {}, applyAssessment() {}, async markScanFailed() {} };
+  const authContext = { user: null, fullName: '', loading: false, configured: false };
+  const mount = createMount(createElement(MemoryRouter, { initialEntries: [`/assessment/${scan.id}`] },
+    createElement(AppContext.Provider, { value: appContext },
+      createElement(AuthContext.Provider, { value: authContext },
+        createElement(Routes, null,
+          createElement(Route, { path: '/assessment/:id', element: createElement(CropAssessmentScreen) }),
+        )))));
+  try {
+    await mount.render();
+    assert.match(mount.host.textContent, /Mock diagnosis displayed after a successful assessment/);
+    assert.match(mount.host.textContent, /Mock leaf discoloration/);
+    assert.doesNotMatch(mount.host.textContent, /Sample result — this was not checked from your photo/);
+  } finally {
+    await mount.unmount();
   }
 });
 

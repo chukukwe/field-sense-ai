@@ -134,4 +134,4 @@ const app = createApp({
   },
 });
 
-app.listen(port, () => console.info(`Field Sense assessment API listening on port ${port}.`));
+app.listen(port, () => console.info(`FarmPal assessment API listening on port ${port}.`));

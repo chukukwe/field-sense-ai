@@ -1,7 +1,7 @@
 {
-  "name": "FieldVoice AI",
-  "short_name": "FieldVoice",
-  "description": "AI crop-health assistant for early plant disease detection and practical field guidance.",
+  "name": "FarmPal",
+  "short_name": "FarmPal",
+  "description": "FarmPal helps farmers check crops and plan their next step.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#202321",
