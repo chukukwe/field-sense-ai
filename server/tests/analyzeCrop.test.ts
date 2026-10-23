@@ -4,6 +4,7 @@ import request from 'supertest';
 import sharp from 'sharp';
 import type { CropAssessmentResult } from '../src/assessmentSchema.js';
 import { createApp, ProviderError, type AnalyzeDependencies } from '../src/app.js';
+import { preservesNumbers } from '../src/gemini.js';
 
 const png = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#30a060' } }).png().toBuffer();
 const assessment: CropAssessmentResult = {
@@ -22,6 +23,7 @@ const assessment: CropAssessmentResult = {
 function setup(overrides: Partial<AnalyzeDependencies> = {}) {
   const persisted: CropAssessmentResult[] = [];
   const fails: string[] = [];
+  const failureMessages: string[] = [];
   const deps: AnalyzeDependencies = {
     verifyIdToken: async (token) => {
       if (token !== 'valid-owner-token' && token !== 'valid-other-token') throw new Error('invalid token');
@@ -29,13 +31,13 @@ function setup(overrides: Partial<AnalyzeDependencies> = {}) {
     },
     claimScan: async (uid, id) => uid === 'owner' && id === 'scan-test' ? 'claimed' : 'missing',
     saveAssessment: async (_uid, _id, result) => { persisted.push(result); },
-    failScan: async (_uid, id) => { fails.push(id); },
+    failScan: async (_uid, id, message) => { fails.push(id); failureMessages.push(message); },
     assessImage: async () => assessment,
     allowedOrigins: ['http://localhost:5173'],
     limiterMax: 50,
     ...overrides,
   };
-  return { app: createApp(deps), persisted, fails };
+  return { app: createApp(deps), persisted, fails, failureMessages };
 }
 
 const auth = { Authorization: 'Bearer valid-owner-token' };
@@ -52,6 +54,18 @@ describe('POST /api/analyze-crop', () => {
     assert.equal((await request(app).post('/api/analyze-crop').set(auth).field('cropType', 'Cassava')).status, 400);
     assert.equal((await request(app).post('/api/analyze-crop').set(auth).field('scanId', 'scan-test').field('cropType', 'Yam')).status, 400);
     assert.equal((await request(app).post('/api/analyze-crop').set(auth).field('scanId', 'scan-test').field('cropType', 'Cassava')).status, 400);
+  });
+
+  it('requires and passes a trimmed custom crop name when Others is selected', async () => {
+    const { app } = setup({ assessImage: async (_image, _mime, crop) => { assert.equal(crop, 'Cocoyam'); return assessment; } });
+    const missing = await request(app).post('/api/analyze-crop').set(auth)
+      .field('scanId', 'scan-test').field('cropType', 'Other')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+    assert.equal(missing.status, 400);
+    const response = await request(app).post('/api/analyze-crop').set(auth)
+      .field('scanId', 'scan-test').field('cropType', 'Other').field('customCropName', '  Cocoyam  ')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+    assert.equal(response.status, 200);
   });
 
   it('rejects unsupported or malformed image bytes declared as PNG', async () => {
@@ -79,6 +93,26 @@ describe('POST /api/analyze-crop', () => {
     assert.equal(persisted.length, 0);
   });
 
+  it('registers a local-only scan under the UID from the verified token before analysis', async () => {
+    const records = new Map<string, { cropType: string; observations: string }>();
+    const { app, persisted } = setup({
+      claimScan: async (uid, scanId, cropType, details) => {
+        const recordKey = `${uid}/${scanId}`;
+        const existing = records.get(recordKey);
+        if (existing && (existing.cropType !== cropType || existing.observations !== details.observations)) return 'missing';
+        if (!existing) records.set(recordKey, { cropType, observations: details.observations });
+        return 'claimed';
+      },
+    });
+    const response = await request(app).post('/api/analyze-crop').set(auth)
+      .field('scanId', 'scan-local-first').field('cropType', 'Cassava').field('observations', 'Yellow lower leaves')
+      .attach('image', png, { filename: 'original.png', contentType: 'image/png' });
+    assert.equal(response.status, 200);
+    assert.deepEqual(records.get('owner/scan-local-first'), { cropType: 'Cassava', observations: 'Yellow lower leaves' });
+    assert.equal(records.has('other/scan-local-first'), false);
+    assert.deepEqual(persisted, [assessment]);
+  });
+
   it('validates and persists a successful result', async () => {
     const { app, persisted } = setup();
     const response = await request(app).post('/api/analyze-crop').set(auth)
@@ -87,6 +121,21 @@ describe('POST /api/analyze-crop', () => {
     assert.equal(response.status, 200);
     assert.deepEqual(response.body.assessment, assessment);
     assert.deepEqual(persisted, [assessment]);
+  });
+
+  it('reports Firestore assessment-save failures separately from Gemini failures', async () => {
+    const { app, persisted, fails } = setup({
+      saveAssessment: async () => { throw Object.assign(new Error('private Firestore details'), { code: 'firestore/unavailable' }); },
+    });
+    const response = await request(app).post('/api/analyze-crop').set(auth)
+      .field('scanId', 'scan-test').field('cropType', 'Cassava')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+    assert.equal(response.status, 503);
+    assert.equal(response.body.error.code, 'ASSESSMENT_SAVE_FAILED');
+    assert.equal(response.body.error.retryable, true);
+    assert.doesNotMatch(JSON.stringify(response.body), /private Firestore details/);
+    assert.equal(persisted.length, 0);
+    assert.deepEqual(fails, ['scan-test']);
   });
 
   it('does not make duplicate provider requests for completed or processing scans', async () => {
@@ -129,7 +178,7 @@ describe('POST /api/analyze-crop', () => {
 
   it('returns retryable timeout and quota responses without success data', async () => {
     for (const [status, code] of [[504, 'GEMINI_TIMEOUT'], [429, 'GEMINI_QUOTA']] as const) {
-      const { app, fails } = setup({
+      const { app, fails, failureMessages } = setup({
         assessImage: async () => { throw new ProviderError(code, status, 'Try later.'); },
       });
       const response = await request(app).post('/api/analyze-crop').set(auth)
@@ -138,7 +187,28 @@ describe('POST /api/analyze-crop', () => {
       assert.equal(response.status, status);
       assert.equal(response.body.error.code, code);
       assert.deepEqual(fails, ['scan-test']);
+      assert.deepEqual(failureMessages, ['Try later.']);
     }
+  });
+
+  it('allows the same saved scan to be assessed again after a retryable failure', async () => {
+    let providerCalls = 0;
+    const { app, fails, persisted } = setup({
+      claimScan: async () => 'claimed',
+      assessImage: async () => {
+        providerCalls += 1;
+        if (providerCalls === 1) throw new ProviderError('GEMINI_TIMEOUT', 504, 'Retry this scan.');
+        return assessment;
+      },
+    });
+    const send = () => request(app).post('/api/analyze-crop').set(auth)
+      .field('scanId', 'scan-test').field('cropType', 'Cassava')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+    assert.equal((await send()).status, 504);
+    assert.equal((await send()).status, 200);
+    assert.equal(providerCalls, 2);
+    assert.deepEqual(fails, ['scan-test']);
+    assert.deepEqual(persisted, [assessment]);
   });
 
   it('returns a safe provider failure response without internal error details', async () => {
@@ -147,7 +217,7 @@ describe('POST /api/analyze-crop', () => {
       .field('scanId', 'scan-test').field('cropType', 'Cassava')
       .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
     assert.equal(response.status, 502);
-    assert.equal(response.body.error.message, 'The crop assessment service could not complete this request.');
+    assert.equal(response.body.error.message, 'The crop assessment service could not complete this request. Try again later.');
     assert.equal(JSON.stringify(response.body).includes('private provider response detail'), false);
   });
 
@@ -160,5 +230,33 @@ describe('POST /api/analyze-crop', () => {
     assert.equal(response.status, 200);
     assert.equal(response.body.assessment.status, 'inconclusive');
     assert.deepEqual(persisted, [inconclusive]);
+  });
+});
+
+describe('POST /api/assessment/translate-pidgin', () => {
+  it('requires authentication and preserves the structured assessment contract', async () => {
+    const { app } = setup({ translateAssessment: async (input) => ({ ...input, summary: 'E get small yellow mark, but we no fit confirm wetin cause am.' }) });
+    assert.equal((await request(app).post('/api/assessment/translate-pidgin').send({ assessment })).status, 401);
+    const response = await request(app).post('/api/assessment/translate-pidgin').set(auth).send({ assessment });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.assessment.status, assessment.status);
+    assert.equal(response.body.assessment.confidence, assessment.confidence);
+    assert.match(response.body.assessment.summary, /E get/);
+  });
+
+  it('rejects incomplete source assessments before requesting translation', async () => {
+    let calls = 0;
+    const { app } = setup({ translateAssessment: async () => { calls += 1; return assessment; } });
+    const response = await request(app).post('/api/assessment/translate-pidgin').set(auth).send({ assessment: { summary: 'only a summary' } });
+    assert.equal(response.status, 400);
+    assert.equal(calls, 0);
+  });
+});
+
+describe('Pidgin translation safety check', () => {
+  it('preserves every number in translated fields', () => {
+    const source = { ...assessment, summary: 'Check again in 48 hours.' };
+    assert.equal(preservesNumbers(source, { ...source, summary: 'Check again in 48 hours.' }), true);
+    assert.equal(preservesNumbers(source, { ...source, summary: 'Check again in 24 hours.' }), false);
   });
 });

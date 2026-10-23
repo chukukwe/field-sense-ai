@@ -7,6 +7,7 @@ export interface ScanDraft {
   photoPreviewUrl: string | null;
   photoSizeMb: number;
   cropType: CropType | null;
+  customCropName: string;
   observations: string;
 }
 

@@ -8,6 +8,7 @@ export interface ScanItem {
   id: string;
   title: string;
   cropType: CropType;
+  customCropName?: string;
   date: string;
   status: ScanStatusType;
   statusVariant: 'red' | 'amber' | 'green';

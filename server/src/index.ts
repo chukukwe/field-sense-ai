@@ -3,7 +3,7 @@ import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { createApp, ProviderError } from './app.js';
-import { assessWithGemini } from './gemini.js';
+import { assessWithGemini, translateAssessmentToPidgin } from './gemini.js';
 import { createSupabasePhotoStore } from './supabasePhotoStore.js';
 import { createNigeriaReverseGeocoder } from './location.js';
 import { getWeatherForecastForLocation, type WeatherRequestLocation } from './weather.js';
@@ -55,6 +55,9 @@ const photoStore = supabaseUrl && supabaseApiKey
       },
     }
   : undefined;
+if (!photoStore) {
+  console.warn('Private crop photo storage is disabled: configure SUPABASE_URL and either SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY in the backend environment.');
+}
 const app = createApp({
   allowedOrigins,
   maxImageBytes: maxImageMb * 1024 * 1024,
@@ -77,12 +80,40 @@ const app = createApp({
   })(),
   resolveDeviceLocation: reverseGeocode,
   verifyIdToken: async (token) => auth.verifyIdToken(token, true),
-  claimScan: async (uid, scanId, cropType) => {
+  claimScan: async (uid, scanId, cropType, details) => {
     const ref = db.doc(`users/${uid}/scans/${scanId}`);
     return db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
-      if (!snapshot.exists || snapshot.data()?.cropType !== cropType) return 'missing';
-      const data = snapshot.data()!;
+      if (!snapshot.exists) {
+        const now = new Date();
+        transaction.create(ref, {
+          id: scanId,
+          title: `${details.customCropName ?? cropType} Leaf`,
+          cropType,
+          ...(details.customCropName ? { customCropName: details.customCropName } : {}),
+          date: new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'Africa/Lagos' }).format(now),
+          status: 'Observation',
+          statusVariant: 'amber',
+          summary: 'Your crop photo is being assessed.',
+          footerIcon: 'clock',
+          footerStatus: 'Analysis in progress',
+          footerActionLabel: 'View assessment',
+          imageUrl: '',
+          photoScope: 'local-only',
+          dataScope: 'cloud',
+          assessmentStatus: 'processing',
+          processingStartedAt: FieldValue.serverTimestamp(),
+          ...(details.observations ? { userObservations: details.observations } : {}),
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        return 'claimed';
+      }
+      const existing = snapshot.data()!;
+      if (existing.cropType !== cropType
+        || existing.customCropName !== details.customCropName
+        || (typeof existing.userObservations === 'string' ? existing.userObservations : '') !== details.observations) return 'missing';
+      const data = existing;
       if (data.assessmentStatus === 'completed' || data.assessmentStatus === 'inconclusive' || data.assessment) return 'complete';
       if (data.assessmentStatus === 'processing') {
         const processingStartedAt = data.processingStartedAt?.toDate?.() as Date | undefined;
@@ -110,10 +141,10 @@ const app = createApp({
       updatedAt: FieldValue.serverTimestamp(),
     });
   },
-  failScan: async (uid, scanId) => {
+  failScan: async (uid, scanId, publicMessage) => {
     await db.doc(`users/${uid}/scans/${scanId}`).update({
       assessmentStatus: 'failed',
-      summary: 'The assessment could not be completed. Your saved photo and scan details are still available.',
+      summary: publicMessage,
       footerStatus: 'Analysis failed',
       footerIcon: 'alert',
       footerActionLabel: 'Retry assessment',
@@ -123,6 +154,10 @@ const app = createApp({
   assessImage: (image, mime, crop, observations) => {
     if (!apiKey) throw new ProviderError('GEMINI_NOT_CONFIGURED', 503, 'The assessment service is not configured yet. Contact the app administrator.');
     return assessWithGemini(image, mime, crop, observations, apiKey, model);
+  },
+  translateAssessment: (assessment) => {
+    if (!apiKey) throw new ProviderError('GEMINI_NOT_CONFIGURED', 503, 'Pidgin translation is not available right now. Your English result is still available.');
+    return translateAssessmentToPidgin(assessment, apiKey, model);
   },
 });
 

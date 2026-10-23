@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { AssessmentRequestError, requestCropAssessment } from '../../src/data/assessmentApi.js';
 import type { CropAssessment } from '../../src/types.js';
+import { translateAssessmentToPidgin } from '../../src/data/pidginTranslationApi.js';
 
 const result: CropAssessment = {
   status: 'inconclusive', cropIdentification: 'unknown', observedSymptoms: [], possibleCauses: [],
@@ -43,5 +44,26 @@ describe('frontend assessment API helper', () => {
       requestCropAssessment(input, async () => Response.json({ assessment: { status: 'completed', summary: 'not enough fields' } })),
       (error: unknown) => error instanceof AssessmentRequestError && error.code === 'INVALID_RESPONSE',
     );
+  });
+
+  it('sends a trimmed crop name for Others', async () => {
+    let form: FormData | undefined;
+    await requestCropAssessment({ ...input, cropType: 'Other', customCropName: '  Cocoyam  ' }, async (_url, init) => {
+      form = init?.body as FormData;
+      return Response.json({ assessment: result });
+    });
+    assert.equal(form?.get('cropType'), 'Other');
+    assert.equal(form?.get('customCropName'), 'Cocoyam');
+  });
+
+  it('keeps Pidgin translation authenticated and rejects incomplete translations', async () => {
+    let init: RequestInit | undefined;
+    const translated = await translateAssessmentToPidgin(result, 'test-token', async (_url, requestInit) => {
+      init = requestInit;
+      return Response.json({ assessment: { ...result, summary: 'Dis photo no show enough detail.' } });
+    });
+    assert.equal(translated.summary, 'Dis photo no show enough detail.');
+    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer test-token');
+    await assert.rejects(translateAssessmentToPidgin(result, 'test-token', async () => Response.json({ assessment: { summary: 'bad' } })), /could not be loaded/i);
   });
 });

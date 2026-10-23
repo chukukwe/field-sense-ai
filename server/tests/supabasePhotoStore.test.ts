@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { PhotoStorageError } from '../src/photoStorageError.js';
 import { createSupabasePhotoStore } from '../src/supabasePhotoStore.js';
 
 describe('Supabase private Storage adapter', () => {
@@ -53,5 +54,36 @@ describe('Supabase private Storage adapter', () => {
       },
     });
     await store.remove('users/uid/scans/scan-1/photo');
+  });
+
+  it('classifies storage authentication, authorization, bucket, and transport failures without reading error bodies', async () => {
+    const cases = [
+      [401, 'invalid_credentials'],
+      [403, 'authorization'],
+      [404, 'bucket_missing'],
+      [502, 'upstream'],
+    ] as const;
+    for (const [status, category] of cases) {
+      const store = createSupabasePhotoStore({
+        url: 'https://project.supabase.co', apiKey: 'test-only-secret', bucket: 'private-bucket',
+        fetcher: async () => new Response('sensitive upstream details', { status }),
+      });
+      await assert.rejects(store.upload('users/uid/scans/scan-1/photo', Buffer.from('image'), 'image/png'), (error: unknown) => {
+        assert.ok(error instanceof PhotoStorageError);
+        assert.equal(error.category, category);
+        assert.equal(JSON.stringify(error).includes('sensitive upstream details'), false);
+        assert.equal(JSON.stringify(error).includes('test-only-secret'), false);
+        return true;
+      });
+    }
+    const networkStore = createSupabasePhotoStore({
+      url: 'https://project.supabase.co', apiKey: 'test-only-secret', bucket: 'private-bucket',
+      fetcher: async () => { throw new TypeError('network connection details'); },
+    });
+    await assert.rejects(networkStore.upload('users/uid/scans/scan-1/photo', Buffer.from('image'), 'image/png'), (error: unknown) => {
+      assert.ok(error instanceof PhotoStorageError);
+      assert.equal(error.category, 'network');
+      return true;
+    });
   });
 });

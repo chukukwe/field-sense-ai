@@ -8,22 +8,16 @@ import { requestCropAssessment } from '../data/assessmentApi';
 import { useAuth } from '../context/useAuth';
 import { uploadCropPhoto } from '../data/photoApi';
 
-const SCANNING_STEPS = [
-  'Preparing your photo…',
-  'Saving crop and observation details…',
-  'Syncing your photo to your account…',
-  'Sending your photo for assessment…',
-  'Opening your saved scan…',
-];
+type ScanStage = 'Preparing scan' | 'Saving scan' | 'Uploading image' | 'Analyzing crop';
 
 export const ScanningScreen: React.FC = () => {
   const navigate = useNavigate();
   const { scanDraft, createScanFromDraft, saveScan, applyAssessment, markScanFailed } = useApp();
   const { user } = useAuth();
-  const hasSubmitted = useRef(false);
+  const scanProcessRef = useRef<Promise<{ scanId: string; photoUploadError?: string }> | null>(null);
 
   const [laserPos, setLaserPos] = useState<number>(20);
-  const [stepIndex, setStepIndex] = useState<number>(0);
+  const [stage, setStage] = useState<ScanStage>('Preparing scan');
   const [dots, setDots] = useState<string>('');
 
   // Animate the laser scanning bar
@@ -39,103 +33,106 @@ export const ScanningScreen: React.FC = () => {
     return () => clearInterval(laserInterval);
   }, []);
 
-  // Cycle through scanning status messages
   useEffect(() => {
-    const stepInterval = setInterval(() => {
-      setStepIndex((prev) => (prev < SCANNING_STEPS.length - 1 ? prev + 1 : prev));
-    }, 650);
-    return () => clearInterval(stepInterval);
-  }, []);
-
-  // Animate trailing dots
-  useEffect(() => {
-    const dotsInterval = setInterval(() => {
-      setDots((prev) => (prev.length >= 3 ? '' : prev + '.'));
-    }, 400);
+    const dotsInterval = setInterval(() => setDots((prev) => prev.length >= 3 ? '' : `${prev}.`), 400);
     return () => clearInterval(dotsInterval);
   }, []);
 
-  // Keep a local recovery copy, save the scan record, and sync the image to
-  // private cloud storage before requesting an assessment.
+  // Keep the original photo on this device, save scan metadata, and allow the
+  // authenticated backend to register local-only metadata during assessment.
   useEffect(() => {
-    const timer = setTimeout(async () => {
-      if (hasSubmitted.current) return;
-      hasSubmitted.current = true;
-      const scan = createScanFromDraft();
-      let photoSaved = false;
-      if (scanDraft.photoFile && scan.photoStorageKey) {
-        try {
-          await saveScanPhoto(scan.photoStorageKey, scanDraft.photoFile);
-          photoSaved = true;
-        } catch {
-          // Keep metadata so the failure is visible and the scan can be reviewed.
-        }
-      }
-
-      const metadataResult = await saveScan({
-        ...scan,
-        photoScope: photoSaved ? 'local-only' : 'missing',
-        status: 'Observation',
-        statusVariant: 'amber',
-        summary: 'Your scan is saved. An AI result has not been generated yet.',
-        footerIcon: 'clock',
-        assessmentStatus: 'pending',
-        footerStatus: 'Assessment pending',
-        footerActionLabel: 'View assessment',
-      });
-
-      if (!photoSaved || !scan.photoStorageKey) {
-        await markScanFailed(scan.id, 'The photo could not be saved on this device, so no assessment was requested.');
-      } else if (metadataResult !== 'cloud') {
-        applyAssessment(scan.id, undefined, 'unavailable', 'This scan is saved on this device only. Sign in with a working connection so its metadata can be verified before analysis.');
-      } else if (!scanDraft.cropType) {
-        await markScanFailed(scan.id, 'Choose a crop type before requesting an assessment.');
-      } else {
+    let active = true;
+    if (!scanProcessRef.current) {
+      scanProcessRef.current = (async () => {
+        setStage('Saving scan');
+        const scan = createScanFromDraft();
         let photoUploadError = '';
-        let localPhoto: Blob | undefined;
-        try {
-          localPhoto = await getScanPhoto(scan.photoStorageKey);
-          if (!localPhoto) throw new Error('The saved photo could not be read from this device.');
-          if (!user) throw new Error('Sign in again before requesting an assessment.');
-        } catch (error) {
-          photoUploadError = error instanceof Error
-            ? error.message
-            : 'The photo could not be read from this device.';
-        }
 
-        // Upload immediately after the authenticated scan record exists. The
-        // backend confirms only after both the private object and Firestore
-        // reference are saved. Keep IndexedDB until that confirmation arrives.
-        if (localPhoto && user) {
-          try { await uploadCropPhoto({ scanId: scan.id, image: localPhoto, idToken: await user.getIdToken() }); }
-          catch (error) {
-            photoUploadError = error instanceof Error
-              ? error.message
-              : 'The photo could not be saved to your account. It remains on this device for now.';
+        try {
+          let photoSaved = false;
+          if (scanDraft.photoFile && scan.photoStorageKey) {
+            try {
+              await saveScanPhoto(scan.photoStorageKey, scanDraft.photoFile);
+              photoSaved = true;
+            } catch {
+              // Keep metadata so the failure is visible and the scan can be reviewed.
+            }
           }
+
+          await saveScan({
+            ...scan,
+            photoScope: photoSaved ? 'local-only' : 'missing',
+            status: 'Observation',
+            statusVariant: 'amber',
+            summary: 'Your scan is saved. An AI result has not been generated yet.',
+            footerIcon: 'clock',
+            assessmentStatus: 'pending',
+            footerStatus: 'Assessment pending',
+            footerActionLabel: 'View assessment',
+          });
+
+          if (!photoSaved || !scan.photoStorageKey) {
+            await markScanFailed(scan.id, 'The photo could not be saved on this device, so no assessment was requested.');
+          } else if (!scanDraft.cropType) {
+            await markScanFailed(scan.id, 'Choose a crop type before requesting an assessment.');
+          } else {
+            let localPhoto: Blob | undefined;
+            let idToken = '';
+            try {
+              localPhoto = await getScanPhoto(scan.photoStorageKey);
+              if (!localPhoto) throw new Error('The saved photo could not be read from this device.');
+              if (!user) throw new Error('Sign in again before requesting an assessment.');
+              idToken = await user.getIdToken();
+            } catch (error) {
+              const message = error instanceof Error
+                ? error.message
+                : 'The photo could not be read from this device.';
+              await markScanFailed(scan.id, message);
+            }
+
+            if (localPhoto && user && idToken) {
+              try {
+                setStage('Analyzing crop');
+                const assessment = await requestCropAssessment({
+                  image: localPhoto,
+                  cropType: scanDraft.cropType,
+                  customCropName: scanDraft.cropType === 'Other' ? scanDraft.customCropName.trim() : undefined,
+                  observations: scanDraft.observations,
+                  scanId: scan.id,
+                  idToken,
+                });
+                applyAssessment(scan.id, assessment, assessment.status, assessment.summary);
+              } catch (error) {
+                await markScanFailed(scan.id, error instanceof Error ? error.message : 'The assessment could not be completed. You can retry this scan.');
+              }
+
+              // The assessment request creates the authenticated user's scan
+              // record when the initial client-side Firestore save was offline.
+              // Sync the same local photo only after that record exists.
+              setStage('Uploading image');
+              try { await uploadCropPhoto({ scanId: scan.id, image: localPhoto, idToken }); }
+              catch (error) {
+                photoUploadError = error instanceof Error
+                  ? error.message
+                  : 'The photo could not be saved to your account. It remains on this device for now.';
+              }
+            }
+          }
+        } catch {
+          await markScanFailed(scan.id, 'The scan could not be completed. You can retry this scan from your scan history.');
         }
 
-        try {
-          if (!localPhoto) throw new Error('The saved photo could not be read from this device.');
-          if (!user) throw new Error('Sign in again before requesting an assessment.');
-          const assessment = await requestCropAssessment({
-            image: localPhoto,
-            cropType: scanDraft.cropType,
-            observations: scanDraft.observations,
-            scanId: scan.id,
-            idToken: await user.getIdToken(),
-          });
-          applyAssessment(scan.id, assessment, assessment.status, assessment.summary);
-        } catch (error) {
-          await markScanFailed(scan.id, error instanceof Error ? error.message : 'The assessment could not be completed. You can retry this scan.');
-        }
-        navigate(`/assessment/${scan.id}`, { state: photoUploadError ? { photoUploadError } : null });
-        return;
-      }
-      navigate(`/assessment/${scan.id}`);
-    }, 3600);
-    return () => clearTimeout(timer);
-  }, [navigate, scanDraft.photoFile, scanDraft.cropType, scanDraft.observations, createScanFromDraft, saveScan, applyAssessment, markScanFailed, user]);
+        return { scanId: scan.id, ...(photoUploadError ? { photoUploadError } : {}) };
+      })();
+    }
+
+    // React Strict Mode replays effects in development. Reuse the same scan
+    // operation, but let the currently mounted effect handle navigation.
+    void scanProcessRef.current.then(({ scanId, photoUploadError }) => {
+      if (active) navigate(`/assessment/${scanId}`, { state: photoUploadError ? { photoUploadError } : null });
+    });
+    return () => { active = false; };
+  }, [navigate, scanDraft.photoFile, scanDraft.cropType, scanDraft.customCropName, scanDraft.observations, createScanFromDraft, saveScan, applyAssessment, markScanFailed, user]);
 
   const previewImage = scanDraft.photoPreviewUrl || '/assets/cassava-leaf-sample.png';
   const cropLabel = scanDraft.cropType || 'Cassava';
@@ -162,7 +159,7 @@ export const ScanningScreen: React.FC = () => {
             <div className="absolute top-3 left-3 right-3 flex items-center justify-between z-10 pointer-events-none gap-2">
               <span className="bg-black/70 backdrop-blur-md text-white text-[11px] px-2.5 py-1 rounded-full font-medium flex items-center gap-1.5 border border-white/10 shrink-0">
                 <span className="w-2 h-2 rounded-full bg-[#22C55E] animate-pulse shrink-0" />
-                Preparing scan
+                {stage}
               </span>
             </div>
 
@@ -179,7 +176,7 @@ export const ScanningScreen: React.FC = () => {
             {/* Frosted Bottom Overlay — Scanning Status */}
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/50 to-transparent rounded-b-xl p-3 z-10">
               <p className="text-[12px] font-semibold text-white tracking-tight">
-                {SCANNING_STEPS[stepIndex].replace('…', '')}{dots}
+                {stage}{dots}
               </p>
             </div>
           </div>

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Menu, X } from 'lucide-react';
+import { LogOut, Menu, X } from 'lucide-react';
+import { signOut } from 'firebase/auth';
+import { firebaseAuth } from '../../lib/firebase';
 
 const navigationItems = [
   { label: 'Home', path: '/' },
@@ -12,6 +14,8 @@ const navigationItems = [
 
 export const NavigationMenuButton: React.FC<{ compact?: boolean }> = ({ compact = false }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
+  const [loggingOut, setLoggingOut] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
@@ -70,6 +74,27 @@ export const NavigationMenuButton: React.FC<{ compact?: boolean }> = ({ compact 
               </button>
             );
           })}
+          <div className="my-1 border-t border-white/10" />
+          <button
+            type="button"
+            disabled={loggingOut}
+            onClick={async () => {
+              setLoggingOut(true);
+              setLogoutError('');
+              try {
+                if (!firebaseAuth) throw new Error('Sign out is not available right now.');
+                await signOut(firebaseAuth);
+                setIsOpen(false);
+                navigate('/auth?mode=sign-in', { replace: true });
+              } catch {
+                setLogoutError('Could not sign out. Check your connection and try again.');
+              } finally { setLoggingOut(false); }
+            }}
+            className="flex w-full items-center gap-2 rounded-xl bg-red-500/10 px-3 py-2.5 text-left text-sm text-red-300 transition hover:bg-red-500/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-400 active:bg-red-500/25 disabled:opacity-60"
+          >
+            <LogOut className="h-4 w-4" />{loggingOut ? 'Logging out…' : 'Log out'}
+          </button>
+          {logoutError && <p role="alert" className="px-2 text-xs text-red-300">{logoutError}</p>}
         </nav>
       )}
     </div>

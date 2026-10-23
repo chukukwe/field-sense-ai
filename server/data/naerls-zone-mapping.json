@@ -1,0 +1,105 @@
+{
+  "source": {
+    "key": "naerls_nfhl_ecological_zones_2024",
+    "title": "States in Nigeria by Ecological Zone",
+    "publisher": "National Farmers' Helpline, National Agricultural Extension and Research Liaison Services (NAERLS)",
+    "url": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+    "publicationYear": 2024,
+    "updatedAt": "2024-05-09",
+    "retrievedAt": "2026-10-23",
+    "license": "No reuse license is stated on the source page; attribution recorded. Confirm reuse terms before redistribution outside this application.",
+    "methodology": "Apply each state-level ecological-zone assignment, then apply only the LGA exceptions explicitly listed by NAERLS. Do not use latitude or coastline rules. Source spelling differences with a clear canonical LGA are mapped with review flags. If the source omits an exception's destination zone or a name cannot be safely matched, keep the area unverified.",
+    "limitations": "This is a text list, not a GIS boundary dataset. Some exception names are misspelled or omit their destination zone. Humid Forest is subdivided into lowland rainforest, freshwater swamp, and mangrove/coastal vegetation, but the source does not map those subtypes to LGAs; they are kept as Humid Forest. No planting dates are supplied by this source."
+  },
+  "reviewStates": {
+    "Kano": "The source repeats Sumaila in the Northern Guinea exception list, so the complete state assignment requires review.",
+    "Osun": "The source names Ife-Osun as a Humid Forest exception, but that name does not exactly identify a current LGA. State assignments are shown with a review flag."
+  },
+  "states": [
+    { "name": "Yobe", "defaultZone": "SAHEL", "exceptions": [
+      { "sourceLga": "Gulani", "zone": "SUDAN" }, { "sourceLga": "Gujba", "zone": "SUDAN" }, { "sourceLga": "Jakusko", "zone": "SUDAN" }, { "sourceLga": "Damaturu", "zone": "SUDAN" }
+    ] },
+    { "name": "Borno", "defaultZone": "SAHEL", "exceptions": [
+      { "sourceLga": "Shani", "zone": "SUDAN" }, { "sourceLga": "Hawul", "zone": "SUDAN" }, { "sourceLga": "Bayo", "zone": "SUDAN" }, { "sourceLga": "Biu", "zone": "SUDAN" }, { "sourceLga": "Kwayakusar", "canonicalLga": "Kwaya Kusar", "zone": "SUDAN", "review": true, "note": "Source spelling joins the canonical LGA name." }, { "sourceLga": "Chibok", "zone": "SUDAN" }, { "sourceLga": "Damboa", "zone": "SUDAN" }, { "sourceLga": "Gwoza", "zone": "SUDAN" }, { "sourceLga": "Askira/Uba", "zone": "SUDAN" }
+    ] },
+    { "name": "Jigawa", "defaultZone": "SUDAN", "exceptions": [
+      { "sourceLga": "Birniwa", "canonicalLga": "Biriniwa", "zone": "SAHEL", "review": true, "note": "Source spelling differs from the canonical LGA name." }, { "sourceLga": "Maigatari", "zone": "SAHEL" }, { "sourceLga": "Malam-Maduri", "canonicalLga": "Malam Madori", "zone": "SAHEL", "review": true, "note": "Source spelling differs from the canonical LGA name." }, { "sourceLga": "Guri", "zone": "SAHEL" }, { "sourceLga": "Hadejia", "zone": "SAHEL" }
+    ] },
+    { "name": "Kano", "defaultZone": "SUDAN", "exceptions": [
+      { "sourceLga": "Doguwa", "zone": "NORTHERN_GUINEA" }, { "sourceLga": "Tudun Wada", "zone": "NORTHERN_GUINEA" }, { "sourceLga": "Sumaila", "zone": "NORTHERN_GUINEA" }, { "sourceLga": "Kibiya", "zone": "NORTHERN_GUINEA" }
+    ] },
+    { "name": "Katsina", "defaultZone": "SUDAN", "exceptions": [
+      { "sourceLga": "Sabuwa", "zone": "NORTHERN_GUINEA" }, { "sourceLga": "Dandume", "zone": "NORTHERN_GUINEA" }, { "sourceLga": "Bakori", "zone": "NORTHERN_GUINEA" }, { "sourceLga": "Faskari", "zone": "NORTHERN_GUINEA" }, { "sourceLga": "Funtua", "zone": "NORTHERN_GUINEA" }, { "sourceLga": "Kafur", "zone": "NORTHERN_GUINEA" }, { "sourceLga": "Kankari", "canonicalLga": "Kankara", "zone": null, "note": "The likely current-name match is not accepted because the source spelling differs and does not confirm the canonical area." }, { "sourceLga": "Malumfashi", "zone": "NORTHERN_GUINEA" }
+    ] },
+    { "name": "Zamfara", "defaultZone": "SUDAN", "exceptions": [
+      { "sourceLga": "Maru", "zone": "NORTHERN_GUINEA" }, { "sourceLga": "Gusau", "zone": "NORTHERN_GUINEA" }, { "sourceLga": "Tsare", "canonicalLga": "Tsafe", "zone": null, "note": "The source spelling does not exactly identify the canonical LGA." }
+    ] },
+    { "name": "Sokoto", "defaultZone": "SUDAN", "exceptions": [
+      { "sourceLga": "Sabon Birni", "zone": "SAHEL" }, { "sourceLga": "Gada", "zone": "SAHEL" }, { "sourceLga": "Illela", "zone": "SAHEL" }
+    ] },
+    { "name": "Kebbi", "defaultZone": "SUDAN", "exceptions": [
+      { "sourceLga": "Ngaski", "zone": "NORTHERN_GUINEA" }, { "sourceLga": "Sakaba", "zone": "NORTHERN_GUINEA" }
+    ] },
+    { "name": "Kaduna", "defaultZone": "NORTHERN_GUINEA", "exceptions": [
+      { "sourceLga": "Sanga", "zone": "SOUTHERN_GUINEA" }, { "sourceLga": "Jema'a", "zone": "SOUTHERN_GUINEA" }, { "sourceLga": "Jaba", "zone": "SOUTHERN_GUINEA" }
+    ] },
+    { "name": "Bauchi", "defaultZone": "NORTHERN_GUINEA", "exceptions": [
+      { "sourceLga": "Ningi", "zone": "MID_ALTITUDE" }, { "sourceLga": "Warji", "zone": "MID_ALTITUDE" }, { "sourceLga": "Toro", "zone": "MID_ALTITUDE" }
+    ] },
+    { "name": "Gombe", "defaultZone": "NORTHERN_GUINEA", "exceptions": [
+      { "sourceLga": "Nafada", "zone": "SUDAN" }, { "sourceLga": "Dukku", "zone": "SUDAN" }, { "sourceLga": "Shangom", "canonicalLga": "Shongom", "zone": "SOUTHERN_GUINEA", "review": true, "note": "Source spelling differs from the canonical LGA name." }, { "sourceLga": "Balanga", "zone": "SOUTHERN_GUINEA" }, { "sourceLga": "Kaltungo", "zone": "SOUTHERN_GUINEA" }, { "sourceLga": "Billri", "canonicalLga": "Billiri", "zone": "SOUTHERN_GUINEA", "review": true, "note": "Source spelling differs from the canonical LGA name." }
+    ] },
+    { "name": "Niger", "defaultZone": "SOUTHERN_GUINEA", "exceptions": [] },
+    { "name": "Adamawa", "defaultZone": "SOUTHERN_GUINEA", "exceptions": [
+      { "sourceLga": "Ganye", "zone": "MID_ALTITUDE" }, { "sourceLga": "Toungo", "zone": "DERIVED_SAVANNA" }
+    ] },
+    { "name": "Nasarawa", "defaultZone": "DERIVED_SAVANNA", "exceptions": [] },
+    { "name": "Kwara", "defaultZone": "DERIVED_SAVANNA", "exceptions": [
+      { "sourceLga": "Kalama", "canonicalLga": "Kaiama", "zone": null, "note": "The source spelling does not exactly identify the canonical LGA." }, { "sourceLga": "Baruten", "zone": "NORTHERN_GUINEA" }
+    ] },
+    { "name": "Federal Capital Territory", "defaultZone": "DERIVED_SAVANNA", "exceptions": [
+      { "sourceLga": "Gwagwalada", "zone": "SOUTHERN_GUINEA" }
+    ] },
+    { "name": "Plateau", "defaultZone": "DERIVED_SAVANNA", "exceptions": [
+      { "sourceLga": "Jos-East", "zone": "MID_ALTITUDE" }, { "sourceLga": "Bassa", "zone": "MID_ALTITUDE" }, { "sourceLga": "Jos-North", "zone": "MID_ALTITUDE" }, { "sourceLga": "Jos-South", "zone": "MID_ALTITUDE" }, { "sourceLga": "Barkin Ladi", "zone": "MID_ALTITUDE" }, { "sourceLga": "Riyom", "zone": "MID_ALTITUDE" }, { "sourceLga": "Kanam", "zone": "NORTHERN_GUINEA" }, { "sourceLga": "Wase", "zone": "SOUTHERN_GUINEA" }
+    ] },
+    { "name": "Kogi", "defaultZone": "DERIVED_SAVANNA", "exceptions": [] },
+    { "name": "Benue", "defaultZone": "DERIVED_SAVANNA", "exceptions": [] },
+    { "name": "Taraba", "defaultZone": "DERIVED_SAVANNA", "exceptions": [
+      { "sourceLga": "Zing", "zone": "HUMID_FOREST" }, { "sourceLga": "Ardo Kola", "zone": "HUMID_FOREST" }, { "sourceLga": "Jalingo", "zone": "HUMID_FOREST" }, { "sourceLga": "Yorro", "zone": "HUMID_FOREST" }, { "sourceLga": "Lau", "zone": "HUMID_FOREST" }, { "sourceLga": "Karim Lamido", "zone": "HUMID_FOREST" }, { "sourceLga": "Sardauna", "zone": "MID_ALTITUDE" }
+    ] },
+    { "name": "Oyo", "defaultZone": "DERIVED_SAVANNA", "exceptions": [] },
+    { "name": "Osun", "defaultZone": "DERIVED_SAVANNA", "exceptions": [
+      { "sourceLga": "Oriade", "zone": "HUMID_FOREST" }, { "sourceLga": "Atakunmasa-East", "canonicalLga": "Atakunmosa East", "zone": "HUMID_FOREST", "review": true, "note": "Source spelling differs from the canonical LGA name." }, { "sourceLga": "Ife-Osun", "canonicalLga": "Ife South", "zone": null, "note": "The source name does not exactly identify a current LGA." }
+    ] },
+    { "name": "Ogun", "defaultZone": "DERIVED_SAVANNA", "exceptions": [
+      { "sourceLga": "Ogun Waterside", "zone": "HUMID_FOREST" }, { "sourceLga": "Odo Ogbolu", "canonicalLga": "Odogbolu", "zone": "HUMID_FOREST", "review": true, "note": "Source spelling differs from the canonical LGA name." }, { "sourceLga": "Shagamu", "zone": "HUMID_FOREST" }, { "sourceLga": "Ifo", "zone": "HUMID_FOREST" }
+    ] },
+    { "name": "Ekiti", "defaultZone": "DERIVED_SAVANNA", "exceptions": [] },
+    { "name": "Enugu", "defaultZone": "DERIVED_SAVANNA", "exceptions": [
+      { "sourceLga": "Oji-river", "zone": "HUMID_FOREST" }, { "sourceLga": "Awgu", "zone": "HUMID_FOREST" }, { "sourceLga": "Aniri", "canonicalLga": "Aninri", "zone": "HUMID_FOREST", "review": true, "note": "Source spelling differs from the canonical LGA name." }
+    ] },
+    { "name": "Lagos", "defaultZone": "HUMID_FOREST", "exceptions": [] },
+    { "name": "Ondo", "defaultZone": "HUMID_FOREST", "exceptions": [
+      { "sourceLga": "Owo", "zone": "DERIVED_SAVANNA" }, { "sourceLga": "Akoko South-West", "zone": "DERIVED_SAVANNA" }, { "sourceLga": "Akoko South-East", "zone": "DERIVED_SAVANNA" }, { "sourceLga": "Akoko North-East", "zone": "DERIVED_SAVANNA" }, { "sourceLga": "Akoko North-West", "zone": "DERIVED_SAVANNA" }
+    ] },
+    { "name": "Edo", "defaultZone": "HUMID_FOREST", "exceptions": [
+      { "sourceLga": "Owan West", "zone": "DERIVED_SAVANNA" }, { "sourceLga": "Akoko Edo", "zone": "DERIVED_SAVANNA" }, { "sourceLga": "Etsako East", "zone": "DERIVED_SAVANNA" }, { "sourceLga": "Etsako Central", "zone": "DERIVED_SAVANNA" }, { "sourceLga": "Etsako West", "zone": "DERIVED_SAVANNA" }
+    ] },
+    { "name": "Delta", "defaultZone": "HUMID_FOREST", "exceptions": [] },
+    { "name": "Bayelsa", "defaultZone": "HUMID_FOREST", "exceptions": [] },
+    { "name": "Rivers", "defaultZone": "HUMID_FOREST", "exceptions": [] },
+    { "name": "Anambra", "defaultZone": "HUMID_FOREST", "exceptions": [
+      { "sourceLga": "Aghamelum", "canonicalLga": "Ayamelum", "zone": null, "note": "The source does not state which zone receives this exception." }
+    ] },
+    { "name": "Imo", "defaultZone": "HUMID_FOREST", "exceptions": [] },
+    { "name": "Ebonyi", "defaultZone": "HUMID_FOREST", "exceptions": [
+      { "sourceLga": "Izzi", "zone": null, "note": "The source does not state which zone receives this exception." }, { "sourceLga": "Ishielu", "zone": null, "note": "The source does not state which zone receives this exception." }, { "sourceLga": "Ohaukwu", "zone": null, "note": "The source does not state which zone receives this exception." }
+    ] },
+    { "name": "Abia", "defaultZone": "HUMID_FOREST", "exceptions": [] },
+    { "name": "Akwa Ibom", "defaultZone": "HUMID_FOREST", "exceptions": [] },
+    { "name": "Cross River", "defaultZone": "HUMID_FOREST", "exceptions": [
+      { "sourceLga": "Yala", "zone": "DERIVED_SAVANNA" }, { "sourceLga": "Ogoja", "zone": "DERIVED_SAVANNA" }, { "sourceLga": "Obudu", "zone": "DERIVED_SAVANNA" }, { "sourceLga": "Bekwara", "canonicalLga": "Bekwarra", "zone": "DERIVED_SAVANNA", "review": true, "note": "Source spelling differs from the canonical LGA name." }, { "sourceLga": "Obanliku", "zone": "DERIVED_SAVANNA" }
+    ] }
+  ]
+}

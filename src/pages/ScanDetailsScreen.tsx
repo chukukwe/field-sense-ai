@@ -6,12 +6,16 @@ import { ScanImage } from '../components/common/ScanImage';
 import { useApp } from '../context/useApp';
 import { useAuth } from '../context/useAuth';
 import { CropPhotoRequestError, uploadLocalScanPhoto, getCloudCropPhoto } from '../data/photoApi';
+import { AssessmentRequestError, requestCropAssessment } from '../data/assessmentApi';
+import { getScanPhoto } from '../data/photoStore';
+import { usePidginAssessment } from '../data/usePidginAssessment';
+import { PidginAssessmentControls } from '../components/common/PidginAssessmentControls';
 import { simpleConfidence, simpleLikelihood } from '../data/assessmentLanguage';
 
 export const ScanDetailsScreen: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { scans, deleteScan, setActiveModal } = useApp();
+  const { scans, deleteScan, setActiveModal, applyAssessment, markScanFailed } = useApp();
   const { user } = useAuth();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -19,12 +23,14 @@ export const ScanDetailsScreen: React.FC = () => {
   const [photoMessage, setPhotoMessage] = useState('');
   const [photoReload, setPhotoReload] = useState(0);
   const [canRetryUpload, setCanRetryUpload] = useState(false);
+  const [assessmentBusy, setAssessmentBusy] = useState(false);
+  const [assessmentMessage, setAssessmentMessage] = useState('');
   const photoInput = useRef<HTMLInputElement>(null);
   const autoUploadAttempt = useRef('');
 
   const scan = scans.find((item) => item.id === id);
   const diagnosis = scan?.diagnosis;
-  const assessment = scan?.assessment;
+  const { language, setLanguage, translated, display: assessment, loading: translationLoading, error: translationError } = usePidginAssessment(scan?.id, scan?.assessment);
   const isSampleScan = Boolean(scan && /^scan-[1-4]$/.test(scan.id));
 
   const handleDelete = async () => {
@@ -93,6 +99,37 @@ export const ScanDetailsScreen: React.FC = () => {
     } finally { setPhotoBusy(false); }
   };
 
+  const retryAssessment = async () => {
+    if (!scan || scan.assessmentStatus !== 'failed' || assessmentBusy || !user) return;
+    setAssessmentBusy(true);
+    setAssessmentMessage('');
+    applyAssessment(scan.id, undefined, 'processing', 'Your crop photo is being assessed.');
+    try {
+      let image = scan.photoStorageKey ? await getScanPhoto(scan.photoStorageKey) : undefined;
+      if (!image && scan.cloudPhotoPath) image = await getCloudCropPhoto({ scanId: scan.id, idToken: await user.getIdToken() });
+      if (!image) {
+        applyAssessment(scan.id, undefined, 'failed', 'The original photo is unavailable. Choose or capture a photo, then retry the assessment.');
+        setAssessmentMessage('The original photo is unavailable. Choose or capture a photo, then retry the assessment.');
+        return;
+      }
+      const result = await requestCropAssessment({
+        image,
+        cropType: scan.cropType,
+        customCropName: scan.customCropName,
+        observations: scan.userObservations ?? '',
+        scanId: scan.id,
+        idToken: await user.getIdToken(),
+      });
+      applyAssessment(scan.id, result, result.status, result.summary);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'The assessment could not be completed. Retry when you are ready.';
+      setAssessmentMessage(message);
+      if (!(error instanceof AssessmentRequestError && error.code === 'ALREADY_PROCESSING')) await markScanFailed(scan.id, message);
+    } finally {
+      setAssessmentBusy(false);
+    }
+  };
+
   if (!scan) {
     return (
       <div className="flex flex-col items-center justify-center flex-1 gap-4 px-4 text-center">
@@ -133,7 +170,7 @@ export const ScanDetailsScreen: React.FC = () => {
           />
           <span className="absolute top-3 left-3 bg-black/60 backdrop-blur-md text-white text-[11px] px-4 py-2 rounded-full font-medium flex items-center gap-1.5 border border-white/10">
             <ImageIcon className="w-3.5 h-3.5 shrink-0" />
-            {scan.cropType} • Scanned {scan.date}
+            {scan.customCropName || scan.cropType} • Scanned {scan.date}
           </span>
         </div>
 
@@ -150,7 +187,7 @@ export const ScanDetailsScreen: React.FC = () => {
               </button>
             </>
           ) : (
-            canRetryUpload && <button disabled={photoBusy} onClick={() => void uploadExistingPhoto(scan, user, undefined, false)} className="self-start text-xs font-semibold text-[#1EB968] disabled:opacity-50">
+            (canRetryUpload || (scan.photoScope === 'local-only' && Boolean(scan.photoStorageKey))) && <button disabled={photoBusy} onClick={() => void uploadExistingPhoto(scan, user, undefined, false)} className="self-start text-xs font-semibold text-[#1EB968] disabled:opacity-50">
               {photoBusy ? 'Syncing photo…' : 'Retry cloud sync'}
             </button>
           )}
@@ -158,6 +195,17 @@ export const ScanDetailsScreen: React.FC = () => {
           {photoMessage && <p role="status" className="text-[11px] text-[#D1D5DB] leading-relaxed">{photoMessage}</p>}
           {!scan.cloudPhotoPath && scan.photoScope === 'local-only' && <p className="text-[11px] text-[#8F9490]">This photo is stored on this device. We’ll sync it to your account automatically when cloud storage is available.</p>}
         </div>
+
+        {scan.assessmentStatus === 'failed' && <section className="rounded-2xl border border-[#B36A2D] bg-[#2E2319] p-4" aria-label="Assessment retry">
+          <h3 className="text-sm font-bold text-white">Assessment failed</h3>
+          <p className="mt-1 text-xs leading-relaxed text-[#D1D5DB]">{scan.summary}</p>
+          <button type="button" onClick={() => void retryAssessment()} disabled={assessmentBusy}
+            className="mt-3 w-full rounded-xl bg-[#176B45] py-3 text-xs font-semibold text-white hover:bg-[#1eb968] disabled:opacity-60">
+            {assessmentBusy ? 'Analyzing crop…' : 'Retry assessment'}
+          </button>
+          {assessmentMessage && <p role="alert" className="mt-2 text-xs text-[#FFB4A8]">{assessmentMessage}</p>}
+          {!scan.photoStorageKey && !scan.cloudPhotoPath && <button type="button" onClick={() => photoInput.current?.click()} className="mt-2 text-xs font-semibold text-[#1EB968]">Choose or capture a photo</button>}
+        </section>}
 
         {/* ── What Was Found ── */}
         <div className="bg-[#292C2A] rounded-2xl p-4 border border-[#323633]">
@@ -210,10 +258,12 @@ export const ScanDetailsScreen: React.FC = () => {
 
             {assessment && (
               <div className="bg-[#1F2B25] p-3.5 rounded-xl border border-[#273B30] flex flex-col gap-3">
+                <PidginAssessmentControls language={language} onLanguageChange={setLanguage} loading={translationLoading} error={translationError}
+                  text={language === 'pidgin' && translated ? [assessment.summary, assessment.confidenceReason, ...assessment.observedSymptoms, ...assessment.possibleCauses.flatMap((cause) => [cause.name, cause.explanation]), ...assessment.recommendedActions, ...assessment.preventionTips, assessment.whenToSeekHelp, ...assessment.limitations, assessment.disclaimer].join('. ') : ''} />
                 <div>
                   <span className="text-[11px] font-bold text-[#FF8A32] block mb-0.5">{assessment.status === 'inconclusive' ? 'Inconclusive visual assessment' : 'AI-assisted visual assessment'}</span>
                   <h4 className="text-sm font-bold text-white mb-1 leading-snug">{assessment.summary}</h4>
-                  <p className="text-[11px] text-[#A1A7A3]">Crop: {assessment.cropIdentification} · How sure: {simpleConfidence(assessment.confidence)}</p>
+                  <p className="text-[11px] text-[#A1A7A3]">Selected crop: {scan.customCropName || scan.cropType} · How sure: {simpleConfidence(assessment.confidence)}</p>
                   <p className="text-[11px] text-[#A1A7A3] mt-1">{assessment.confidenceReason}</p>
                 </div>
                 {!!assessment.observedSymptoms.length && <div>

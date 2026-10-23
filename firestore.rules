@@ -20,13 +20,20 @@ service cloud.firestore {
 
     function validScan(data) {
       return data.keys().hasOnly([
-        'title', 'cropType', 'date', 'status', 'statusVariant', 'summary',
+        'title', 'cropType', 'customCropName', 'date', 'status', 'statusVariant', 'summary',
         'footerIcon', 'footerStatus', 'footerActionLabel', 'imageUrl',
         'cloudPhotoPath', 'photoStorageKey', 'photoScope', 'dataScope', 'assessmentStatus', 'imageSizeMb',
         'userObservations', 'updatedAt'
       ])
       && data.title is string
       && data.cropType in ['Cassava', 'Plantain', 'Maize', 'Vegetables', 'Other']
+      && (data.cropType == 'Other'
+        ? (!('customCropName' in data) || (
+          data.customCropName is string
+          && data.customCropName.size() > 0
+          && data.customCropName.size() <= 80
+        ))
+        : !('customCropName' in data))
       && data.date is string
       && data.status == 'Observation'
       && data.statusVariant == 'amber'

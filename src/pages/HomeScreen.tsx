@@ -32,7 +32,7 @@ const FooterIcon: React.FC<{ icon: ScanItem['footerIcon'] }> = ({ icon }) => {
 
 export const HomeScreen: React.FC = () => {
   const navigate = useNavigate();
-  const { scans } = useApp();
+  const { scans, resetScanDraft } = useApp();
 
   const recentScans = scans.slice(0, 3);
   const hasSampleScans = scans.some((scan) => /^scan-[1-4]$/.test(scan.id));
@@ -70,7 +70,7 @@ export const HomeScreen: React.FC = () => {
             </p>
 
             <button
-              onClick={() => navigate('/scan')}
+              onClick={() => { resetScanDraft(); navigate('/scan'); }}
               className="mt-4 w-full bg-[#176B45] hover:bg-[#1eb968] active:scale-[0.98] transition text-white font-semibold text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-md cursor-pointer"
             >
               <Camera className="w-4 h-4" />

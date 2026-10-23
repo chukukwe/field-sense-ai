@@ -24,7 +24,8 @@ function ProtectedRoutes() {
 }
 
 function ApplicationLayout() {
-  return <AppProvider><AppLayout><Outlet /></AppLayout></AppProvider>;
+  const { user } = useAuth();
+  return <AppProvider key={user?.uid ?? 'signed-out'}><AppLayout><Outlet /></AppLayout></AppProvider>;
 }
 
 export function App() {

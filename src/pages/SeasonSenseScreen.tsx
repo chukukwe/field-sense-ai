@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ChevronDown, CloudRain, LoaderCircle, RefreshCw, Sprout } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronDown, CloudRain, LoaderCircle, RefreshCw, Sprout } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { TopHeader } from '../components/common/TopHeader';
 import { fetchLgaSeasonPlan, fetchSeasonLgas, fetchSeasonStates, SeasonPlanningApiError } from '../data/seasonPlanningApi';
-import type { SeasonDatabaseEntry, SeasonDatabaseLga, SeasonDatabasePlan, SeasonDatabaseState } from '../data/seasonPlanningApi';
+import type { SeasonDatabaseLga, SeasonDatabasePlan, SeasonDatabaseState, SeasonPlanningWindow } from '../data/seasonPlanningApi';
 import { getCropPreviewImage } from '../data/seasonRecommendations';
+import { getFallbackSeasonPlanningDemos, getSeasonPlanningDemo, getSeasonPlanningDemos } from '../data/seasonPlanningDemo';
+import type { SeasonPlanningDemo } from '../data/seasonPlanningDemo';
 import { fetchSeasonalRainfall, SeasonalRainfallApiError } from '../data/seasonRainfallApi';
 import type { SeasonalRainfallResult } from '../data/seasonRainfallApi';
 
@@ -38,7 +40,7 @@ function readPersistedView(): SavedView | null {
 }
 
 function savedCropId(cropKey: string | undefined): string {
-  return cropKey?.startsWith('calendar:') ? cropKey : '';
+  return cropKey?.startsWith('calendar:') || cropKey?.startsWith('demo:') ? cropKey : '';
 }
 
 function lagosToday(): string {
@@ -49,23 +51,91 @@ function lagosToday(): string {
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
-function monthLabel(date: string): string {
-  const [year, month, day] = date.split('-').map(Number);
-  return new Intl.DateTimeFormat('en-NG', { month: 'long', year: 'numeric', timeZone: 'Africa/Lagos' })
-    .format(new Date(Date.UTC(year!, month! - 1, day!)));
-}
-
 function cropSlug(name: string): string {
   return name.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-function calendarCropId(entry: SeasonDatabaseEntry): string {
-  return `calendar:${entry.activity}:${entry.season}:${cropSlug(entry.crop)}`;
+function calendarCropId(entry: SeasonPlanningWindow): string {
+  return `calendar:${entry.activity}:${entry.season}:${cropSlug(entry.crop)}:${entry.monthStart}-${entry.monthEnd}`;
+}
+
+function demoCropId(entry: SeasonPlanningDemo): string {
+  return entry.id;
+}
+
+function formatDemoUpdatedAt(value: string): string {
+  return new Intl.DateTimeFormat('en-NG', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Africa/Lagos' })
+    .format(new Date(`${value}T12:00:00+01:00`));
+}
+
+function planningMonthRange(entry: Pick<SeasonPlanningWindow, 'monthStart' | 'monthEnd'>): string {
+  const formatMonth = (month: number) => new Intl.DateTimeFormat('en-NG', { month: 'long', timeZone: 'Africa/Lagos' })
+    .format(new Date(Date.UTC(2024, month - 1, 15)));
+  const start = formatMonth(entry.monthStart);
+  const end = formatMonth(entry.monthEnd);
+  return start === end ? start : `${start}–${end}`;
+}
+
+function planningWindowStatus(status: SeasonPlanningWindow['status']): string {
+  if (status === 'verified') return 'Verified source entry · check local fit';
+  if (status === 'reviewed') return 'Reviewed source entry · check local fit';
+  return 'Draft · not verified planting advice';
 }
 
 function titleCase(value: string): string {
   return value.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 }
+
+const SeasonPlanningDemoSections: React.FC<{ plan: SeasonPlanningDemo }> = ({ plan }) => (
+  <div className="flex flex-col gap-3">
+    <section className="rounded-2xl border border-[#66542E] bg-[#292C2A] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-bold text-white">Illustrative crop guide</h2>
+        <span className="rounded-full bg-[#3A3321] px-2.5 py-1 text-[10px] font-semibold text-[#FCD34D]">Demo data · Not verified</span>
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-[#D1D5DB]">{plan.crop} · {plan.zoneName}</p>
+      <p className="mt-2 text-xs leading-relaxed text-[#A1A7A3]">Example content only. It is not a verified planting recommendation and is not based on your field conditions.</p>
+      <p className="mt-2 text-[11px] text-[#A1A7A3]">Content updated {formatDemoUpdatedAt(plan.updatedAt)} · {plan.source.label}</p>
+    </section>
+
+    <section className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4">
+      <h2 className="text-sm font-bold text-white">Planning period · illustrative</h2>
+      <p className="mt-2 text-xs leading-relaxed text-[#D1D5DB]">{plan.planningPeriod}</p>
+      <h3 className="mt-4 text-xs font-bold text-white">Zone context</h3>
+      <p className="mt-1 text-xs leading-relaxed text-[#A1A7A3]">{plan.zoneContext}</p>
+    </section>
+
+    <section className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4">
+      <h2 className="text-sm font-bold text-white">Prepare and plant</h2>
+      <h3 className="mt-3 text-xs font-bold text-[#BBF7D0]">Land preparation</h3>
+      <p className="mt-1 text-xs leading-relaxed text-[#D1D5DB]">{plan.landPreparation}</p>
+      <h3 className="mt-3 text-xs font-bold text-[#BBF7D0]">Planting</h3>
+      <p className="mt-1 text-xs leading-relaxed text-[#D1D5DB]">{plan.planting}</p>
+    </section>
+
+    <section className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4">
+      <h2 className="text-sm font-bold text-white">Water and nutrients</h2>
+      <p className="mt-2 text-xs leading-relaxed text-[#D1D5DB]">{plan.water}</p>
+      <h3 className="mt-3 text-xs font-bold text-[#BBF7D0]">Nutrient management</h3>
+      <p className="mt-1 text-xs leading-relaxed text-[#D1D5DB]">{plan.nutrients}</p>
+    </section>
+
+    <section className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4">
+      <h2 className="text-sm font-bold text-white">Monitor and maintain</h2>
+      <h3 className="mt-3 text-xs font-bold text-[#BBF7D0]">Possible risks to monitor</h3>
+      <ul className="mt-2 space-y-2">{plan.risks.map((item) => <li key={item} className="flex gap-2 text-xs leading-relaxed text-[#D1D5DB]"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#FCD34D]" aria-hidden="true" />{item}</li>)}</ul>
+      <h3 className="mt-3 text-xs font-bold text-[#BBF7D0]">Care tasks</h3>
+      <ul className="mt-2 space-y-2">{plan.maintenance.map((item) => <li key={item} className="flex gap-2 text-xs leading-relaxed text-[#D1D5DB]"><span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#22C55E]" aria-hidden="true" />{item}</li>)}</ul>
+    </section>
+
+    <section className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4">
+      <h2 className="text-sm font-bold text-white">Indicative crop timeline</h2>
+      <ol className="mt-3 space-y-2">{plan.timeline.map((item, index) => <li key={item} className="flex gap-2 text-xs leading-relaxed text-[#D1D5DB]"><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#1B4733] text-[10px] font-bold text-[#BBF7D0]">{index + 1}</span>{item}</li>)}</ol>
+      <h3 className="mt-4 text-xs font-bold text-[#BBF7D0]">Harvest</h3>
+      <p className="mt-1 text-xs leading-relaxed text-[#D1D5DB]">{plan.harvest}</p>
+    </section>
+  </div>
+);
 
 export const SeasonSenseScreen: React.FC = () => {
   const navigate = useNavigate();
@@ -145,13 +215,15 @@ export const SeasonSenseScreen: React.FC = () => {
   const activeState = states.find((state) => state.id === activeLocation?.stateId);
   const activeLga = lgas.find((lga) => lga.id === activeLocation?.lgaId);
   const activeZone = activeLga?.zone.name ?? null;
-  const planSections = useMemo(() => seasonPlan ? [
-    { key: 'plant-now', title: `Plant this month · ${seasonPlan.calendar.monthName}`, entries: seasonPlan.plantNow, empty: seasonPlan.emptyMessages.plantNow },
-    { key: 'harvest-now', title: `Harvest this month · ${seasonPlan.calendar.monthName}`, entries: seasonPlan.harvestNow, empty: seasonPlan.emptyMessages.harvestNow },
-    { key: 'plant-next', title: `Plant next month · ${seasonPlan.calendar.nextMonthName}`, entries: seasonPlan.plantNextMonth, empty: seasonPlan.emptyMessages.plantNextMonth },
-  ] : [], [seasonPlan]);
-  const planEntries = useMemo(() => planSections.flatMap((section) => section.entries), [planSections]);
+  const planEntries = useMemo(() => seasonPlan?.planningWindows ?? [], [seasonPlan]);
   const selectedCrop = planEntries.find((entry) => calendarCropId(entry) === selectedCropId) ?? null;
+  const activeZoneCode = seasonPlan?.location.zone.code ?? activeLga?.zone.code ?? '';
+  const fallbackDemos = useMemo(() => getFallbackSeasonPlanningDemos(
+    activeZoneCode,
+    planEntries.map((entry) => entry.crop),
+  ), [activeZoneCode, planEntries]);
+  const selectedDemoCrop = selectedCrop ? null : getSeasonPlanningDemos(activeZoneCode).find((entry) => demoCropId(entry) === selectedCropId) ?? null;
+  const sourceCropGuide = selectedCrop ? getSeasonPlanningDemo(activeZoneCode, selectedCrop.crop) : null;
   const loadingStates = states.length === 0 && !statesError;
   const locationError = statesError || lgasError;
 
@@ -188,12 +260,26 @@ export const SeasonSenseScreen: React.FC = () => {
     setScreen('location');
   };
 
-  const returnToRecommendations = () => {
+  const returnHomeFromPlanning = useCallback(() => {
     setSelectedCropId('');
-    setLoadingRecommendations(true);
-    setRecommendationsError('');
-    setScreen('recommendations');
-  };
+    if (activeLocation) {
+      try {
+        window.localStorage.setItem(PERSISTED_VIEW_KEY, JSON.stringify({
+          screen: 'recommendations',
+          stateId: activeLocation.stateId,
+          lgaId: activeLocation.lgaId,
+        } satisfies SavedView));
+      } catch { /* Keep navigation working if browser storage is unavailable. */ }
+    }
+    navigate('/', { replace: true });
+  }, [activeLocation, navigate]);
+
+  useEffect(() => {
+    if (screen === 'location') return;
+    const returnHomeOnBrowserBack = () => returnHomeFromPlanning();
+    window.addEventListener('popstate', returnHomeOnBrowserBack);
+    return () => window.removeEventListener('popstate', returnHomeOnBrowserBack);
+  }, [screen, returnHomeFromPlanning]);
 
   return (
     <div className="flex flex-col pb-2">
@@ -201,7 +287,7 @@ export const SeasonSenseScreen: React.FC = () => {
         variant="detail"
         title="Season Recommendation"
         showHelp
-        onBack={screen === 'location' ? () => navigate('/') : screen === 'details' ? returnToRecommendations : changeArea}
+        onBack={screen === 'location' ? () => navigate('/') : returnHomeFromPlanning}
       />
 
       <main className="flex flex-col gap-4 px-4">
@@ -263,7 +349,7 @@ export const SeasonSenseScreen: React.FC = () => {
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#A1A7A3]" aria-hidden="true" />
               </div>
-              <p className="mt-2 text-[11px] leading-relaxed text-[#A1A7A3]">Your LGA is matched to a broad farming zone. Some zone assignments are approximate and need local review.</p>
+              <p className="mt-2 text-[11px] leading-relaxed text-[#A1A7A3]">The farming zone comes from a published Nigerian agricultural-zone list. A few locations still need review.</p>
               {locationError && <p role="alert" className="mt-3 rounded-xl border border-[#70403B] bg-[#382321] p-3 text-xs leading-relaxed text-[#FCA5A5]">{locationError}</p>}
               <button type="submit" disabled={!selectedLga || loadingLgas} className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#176B45] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#1eb968] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60">
                 View crop planning windows
@@ -272,7 +358,7 @@ export const SeasonSenseScreen: React.FC = () => {
 
             <div className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4">
               <h2 className="text-sm font-bold text-white">About this calendar</h2>
-              <p className="mt-2 text-xs leading-relaxed text-[#D1D5DB]">Crop timing comes from the planning database and is still marked draft. The LGA-to-zone map is approximate in some areas. Use the calendar to explore, then confirm dates with a local extension worker.</p>
+              <p className="mt-2 text-xs leading-relaxed text-[#D1D5DB]">Source planting periods and historical crop reports are kept separate. Draft dates are not advice for your farm.</p>
             </div>
           </>
         )}
@@ -284,16 +370,13 @@ export const SeasonSenseScreen: React.FC = () => {
                 <div className="min-w-0">
                   <h1 className="text-base font-bold text-white">{activeLga.name}, {activeState.name}</h1>
                   <p className="mt-1 text-xs text-[#A1A7A3]">Farming zone: {activeZone}{activeLga.needsReview ? ' · check local zone' : ''}</p>
-                  <p className="mt-1 text-xs text-[#A1A7A3]">{monthLabel(today)}</p>
+                  {activeLga.zoneSource && <a href={activeLga.zoneSource.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-[11px] font-semibold text-[#86EFAC] underline underline-offset-2">Zone source: {activeLga.zoneSource.title} · {activeLga.zoneSource.publicationYear}</a>}
+                  <p className="mt-1 text-xs text-[#A1A7A3]">{seasonPlan?.cropTiming.status === 'sourced' ? 'Historical survey records' : 'No historical survey records'}</p>
                 </div>
                 <button type="button" onClick={changeArea} className="shrink-0 whitespace-nowrap rounded-lg px-2 py-1 text-xs font-semibold text-[#22C55E] hover:bg-[#202321]">Change area</button>
               </div>
               <p className="mt-3 rounded-xl bg-[#202321] p-3 text-[11px] leading-relaxed text-[#D1D5DB]">
-                {seasonPlan?.calendar.status === 'verified'
-                  ? 'These calendar entries have been checked, but planting dates still depend on your field and the current rains.'
-                  : seasonPlan?.calendar.status === 'mixed'
-                    ? 'Some calendar entries are checked and others are still draft. Planting dates still depend on your field and the current rains.'
-                    : 'These crop timing records are still draft. The zone map may need local review. Confirm dates with an agricultural extension worker before planting.'}
+                {seasonPlan?.calendar.notice ?? 'Historical crop records are not planting advice.'}
               </p>
             </section>
 
@@ -303,7 +386,6 @@ export const SeasonSenseScreen: React.FC = () => {
                 <h2 id="seasonal-rainfall-heading" className="text-sm font-bold text-white">NiMet seasonal rainfall</h2>
               </div>
               <p className="mt-2 text-xs leading-relaxed text-[#A1A7A3]">Rainfall information for {activeLga.name}, {activeState.name} in {today.slice(0, 4)}. It adds local context; it does not choose crops or guarantee rain on a certain day.</p>
-              <a href="https://nimet.gov.ng/weatherapi" target="_blank" rel="noreferrer" className="mt-1 inline-flex text-[11px] font-semibold text-[#93C5FD] underline underline-offset-2">Data from NiMet</a>
               {loadingRainfall ? (
                 <div role="status" className="mt-3 flex items-center gap-2 text-xs text-[#D1D5DB]">
                   <LoaderCircle className="h-4 w-4 animate-spin text-[#60A5FA]" aria-hidden="true" />
@@ -335,47 +417,117 @@ export const SeasonSenseScreen: React.FC = () => {
 
             <section aria-labelledby="zone-crops-heading" className="flex flex-col gap-3">
               <div className="flex items-center justify-between gap-2 px-1">
-                <h2 id="zone-crops-heading" className="text-sm font-bold text-white">Crop planning calendar</h2>
-                <span className="rounded-full bg-[#302B20] px-2.5 py-1 text-[10px] font-semibold text-[#FCD34D]">
-                  {seasonPlan?.calendar.status === 'verified' ? 'Verified data' : seasonPlan?.calendar.status === 'mixed' ? 'Mixed review' : 'Draft data'}
+                <h2 id="zone-crops-heading" className="text-sm font-bold text-white">Crop planning guides</h2>
+                <span className="rounded-full bg-[#153A2A] px-2.5 py-1 text-[10px] font-semibold text-[#86EFAC]">
+                  {seasonPlan?.planningWindows.length ? 'Source + examples' : 'Illustrative examples'}
                 </span>
               </div>
-              <p className="px-1 text-xs leading-relaxed text-[#A1A7A3]">Timing changes with rainfall, crop variety, soil and field conditions. This calendar does not know your farm’s planting history.</p>
               {loadingRecommendations ? (
-                <div role="status" className="flex min-h-24 items-center justify-center gap-2 rounded-2xl border border-[#323633] bg-[#292C2A] text-sm text-[#D1D5DB]">
+                <div role="status" className="flex min-h-16 items-center gap-2 rounded-2xl border border-[#323633] bg-[#292C2A] px-4 text-xs text-[#D1D5DB]">
                   <LoaderCircle className="h-5 w-5 animate-spin text-[#22C55E]" aria-hidden="true" />
-                  Loading crop calendar…
+                  Checking for source-backed crop windows. {fallbackDemos.length ? 'Clearly labelled examples are shown below while we check.' : 'No zone examples are shown until this location zone is confirmed.'}
                 </div>
+              ) : null}
+              {recommendationsError && <p role="alert" className="rounded-2xl border border-[#70403B] bg-[#382321] p-4 text-xs leading-relaxed text-[#FCA5A5]">{recommendationsError} {fallbackDemos.length ? 'Illustrative guides remain available below.' : 'No zone-specific examples are shown because this zone is unverified.'}</p>}
+              {!!planEntries.length && (
+                <>
+                  <div className="px-1">
+                    <h3 className="text-xs font-bold text-white">Available source windows</h3>
+                    <p className="mt-1 text-xs leading-relaxed text-[#A1A7A3]">Shown before examples because they come from a published calendar. Each entry shows its review status and may still need local confirmation.</p>
+                  </div>
+                  {planEntries.map((window, index) => <article key={`${window.crop}-${window.activity}-${window.monthStart}-${window.monthEnd}-${index}`} className="overflow-hidden rounded-2xl border border-[#323633] bg-[#292C2A]">
+                  <div className="flex items-start gap-3 p-4">
+                    {getCropPreviewImage(window.crop) ? <img src={getCropPreviewImage(window.crop)} alt={`${window.crop} plant`} className="h-16 w-16 shrink-0 rounded-xl bg-[#181B19] object-cover" loading="lazy" /> : <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-[#1B4733] text-[#A7F3D0]"><Sprout className="h-7 w-7" aria-hidden="true" /></div>}
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-bold text-white">{titleCase(window.crop)}</h3>
+                      <p className="mt-1 text-xs text-[#D1D5DB]">Source {window.activity === 'plant' ? 'planting' : 'harvest'} period · {planningMonthRange(window)}</p>
+                      <p className={`mt-1 text-[11px] ${window.status === 'verified' ? 'text-[#86EFAC]' : 'text-[#FCD34D]'}`}>{planningWindowStatus(window.status)}</p>
+                    </div>
+                  </div>
+                  <div className="border-t border-[#3B403C] px-4 py-3 text-[11px] leading-relaxed text-[#A1A7A3]">
+                    <p>Area named in source: {window.evidenceScope}</p>
+                    <p className="mt-1">{window.reviewNotes}</p>
+                    {window.sources.map((source) => <div key={source.key} className="mt-2">
+                      <a href={source.url} target="_blank" rel="noreferrer" className="font-semibold text-[#86EFAC] underline underline-offset-2">{source.title}</a>
+                      <p>{source.publisher} · published {source.publicationYear} · {source.license}</p>
+                    </div>)}
+                    <button type="button" onClick={() => { setSelectedCropId(calendarCropId(window)); setScreen('details'); }} className="mt-3 min-h-9 font-semibold text-[#22C55E]">View crop details</button>
+                  </div>
+                </article>)}
+                  </>
+              )}
+              {!loadingRecommendations && !recommendationsError && fallbackDemos.length > 0 && !planEntries.length && seasonPlan?.zoneRecommendations.message && (
+                <p role="status" className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4 text-xs leading-relaxed text-[#A1A7A3]">{seasonPlan.zoneRecommendations.message} Illustrative guides are shown below and are not verified advice.</p>
+              )}
+              {!!fallbackDemos.length && (
+                <div className="mt-1 flex flex-col gap-3" aria-label="Illustrative crop examples">
+                  <div className="flex items-start justify-between gap-3 px-1">
+                    <div>
+                      <h3 className="text-xs font-bold text-white">Illustrative crop guides</h3>
+                      <p className="mt-1 text-xs leading-relaxed text-[#A1A7A3]">These examples fill gaps where a source window is missing. They are not official dates, verified advice, or based on current field conditions.</p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-[#3A3321] px-2 py-1 text-[10px] font-semibold text-[#FCD34D]">Demo · Not verified</span>
+                  </div>
+                  {fallbackDemos.map((demo) => <article key={demo.id} className="overflow-hidden rounded-2xl border border-[#66542E] bg-[#292C2A]">
+                    <div className="flex items-start gap-3 p-4">
+                      {getCropPreviewImage(demo.crop) ? <img src={getCropPreviewImage(demo.crop)} alt={`${demo.crop} plant`} className="h-16 w-16 shrink-0 rounded-xl bg-[#181B19] object-cover" loading="lazy" /> : <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-[#1B4733] text-[#A7F3D0]"><Sprout className="h-7 w-7" aria-hidden="true" /></div>}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="text-sm font-bold text-white">{demo.crop}</h4>
+                          <span className="rounded-full bg-[#3A3321] px-2 py-0.5 text-[10px] font-semibold text-[#FCD34D]">Demo · Not verified</span>
+                        </div>
+                        <p className="mt-1 text-xs text-[#D1D5DB]">{demo.zoneName} · illustrative example</p>
+                        <p className="mt-2 text-[11px] leading-relaxed text-[#A1A7A3]">{demo.planningPeriod}</p>
+                      </div>
+                    </div>
+                    <div className="border-t border-[#3B403C] px-4 py-3 text-[11px] leading-relaxed text-[#A1A7A3]">
+                      <p>{demo.zoneContext}</p>
+                      <button type="button" onClick={() => { setSelectedCropId(demoCropId(demo)); setScreen('details'); }} className="mt-2 min-h-9 font-semibold text-[#22C55E]">View illustrative guide</button>
+                    </div>
+                  </article>)}
+                </div>
+              )}
+              {!fallbackDemos.length && !planEntries.length && !loadingRecommendations && !recommendationsError && (
+                <p role="status" className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4 text-xs leading-relaxed text-[#A1A7A3]">This area's farming zone is not verified, so we cannot safely select zone-specific examples. Check the location assignment with an agricultural extension worker.</p>
+              )}
+            </section>
+
+            <section aria-labelledby="historical-crops-heading" className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-2 px-1">
+                <h2 id="historical-crops-heading" className="text-sm font-bold text-white">Historical crop records</h2>
+                <span className="rounded-full bg-[#153A2A] px-2.5 py-1 text-[10px] font-semibold text-[#86EFAC]">
+                  {seasonPlan?.cropTiming.status === 'sourced' ? 'Survey data' : 'No data yet'}
+                </span>
+              </div>
+              <p className="px-1 text-xs leading-relaxed text-[#A1A7A3]">These records show what surveyed households reported in past years. They are separate from the source planting windows and are not advice for this season.</p>
+              {loadingRecommendations ? (
+                <div role="status" className="flex min-h-20 items-center justify-center gap-2 rounded-2xl border border-[#323633] bg-[#292C2A] text-sm text-[#D1D5DB]"><LoaderCircle className="h-5 w-5 animate-spin text-[#22C55E]" aria-hidden="true" />Loading historical reports…</div>
               ) : recommendationsError ? (
                 <p role="alert" className="rounded-2xl border border-[#70403B] bg-[#382321] p-4 text-xs leading-relaxed text-[#FCA5A5]">{recommendationsError}</p>
-              ) : planSections.map((section) => (
-                <section key={section.key} className="flex flex-col gap-3" aria-label={section.title}>
-                  <h3 className="px-1 text-sm font-bold text-white">{section.title}</h3>
-                  {section.entries.length === 0 ? (
-                    <p className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4 text-xs text-[#A1A7A3]">{section.empty ?? 'No calendar entries are listed for this period.'}</p>
-                  ) : section.entries.map((entry) => {
-                    const image = getCropPreviewImage(entry.crop);
-                    return (
-                      <article key={calendarCropId(entry)} className="overflow-hidden rounded-2xl border border-[#323633] bg-[#292C2A] shadow-sm">
-                        <div className="flex items-center gap-3 p-4">
-                          {image ? <img src={image} alt={`${entry.crop} plant`} className="h-16 w-16 shrink-0 rounded-xl bg-[#181B19] object-cover" loading="lazy" /> : <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-[#1B4733] text-[#A7F3D0]"><Sprout className="h-7 w-7" aria-hidden="true" /></div>}
-                          <div className="min-w-0 flex-1">
-                            <h4 className="text-sm font-bold text-white">{entry.crop}</h4>
-                            <p className="mt-1 text-[11px] text-[#D1D5DB]">{titleCase(entry.category)} · {titleCase(entry.season)}</p>
-                            {entry.localNames && <p className="mt-1 text-[10px] leading-relaxed text-[#A1A7A3]">Also called: {entry.localNames}</p>}
-                          </div>
-                        </div>
-                        <div className="border-t border-[#3B403C] px-4 py-3">
-                          <p className="text-[11px] font-semibold text-[#FCD34D]">Draft calendar entry</p>
-                          <button type="button" onClick={() => { setSelectedCropId(calendarCropId(entry)); setScreen('details'); }} className="mt-2 inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-[#22C55E] hover:bg-[#202321]">
-                            View crop details <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                          </button>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </section>
-              ))}
+              ) : seasonPlan?.cropTiming.status === 'unavailable' ? (
+                <p className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4 text-xs leading-relaxed text-[#A1A7A3]">No historical survey reports are available for this LGA.</p>
+              ) : seasonPlan?.cropTiming.observations.map((observation, index) => {
+                const monthName = (month: number | null) => month === null ? null : new Intl.DateTimeFormat('en-NG', { month: 'long', timeZone: 'Africa/Lagos' }).format(new Date(Date.UTC(2024, month - 1, 15)));
+                const timing = observation.monthStart === observation.monthEnd
+                  ? monthName(observation.monthStart) ?? 'Month not recorded'
+                  : `${monthName(observation.monthStart) ?? 'Not recorded'}–${monthName(observation.monthEnd) ?? 'not recorded'}`;
+                return <article key={`${observation.crop}-${observation.activity}-${observation.monthStart}-${observation.monthEnd}-${index}`} className="overflow-hidden rounded-2xl border border-[#323633] bg-[#292C2A]">
+                  <div className="flex items-start gap-3 p-4">
+                    {getCropPreviewImage(observation.crop) ? <img src={getCropPreviewImage(observation.crop)} alt={`${titleCase(observation.crop)} plant`} className="h-16 w-16 shrink-0 rounded-xl bg-[#181B19] object-cover" loading="lazy" /> : <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-[#1B4733] text-[#A7F3D0]"><Sprout className="h-7 w-7" aria-hidden="true" /></div>}
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-bold text-white">{titleCase(observation.crop)}</h3>
+                      <p className="mt-1 text-xs text-[#D1D5DB]">Reported {observation.activity === 'plant' ? 'planting' : 'harvest'} period · {timing}</p>
+                      <p className="mt-1 text-[11px] text-[#A1A7A3]">{observation.evidenceCount} survey {observation.evidenceCount === 1 ? 'record' : 'records'} · survey years {observation.surveyYears.join(', ') || 'not listed'}</p>
+                    </div>
+                  </div>
+                  <div className="border-t border-[#3B403C] px-4 py-3 text-[11px] leading-relaxed text-[#A1A7A3]">
+                    <p>Source scope: {observation.geographicScope}</p>
+                    <p className="mt-1">Original crop labels: {observation.sourceCropNames.slice(0, 3).join(', ') || observation.crop}{observation.sourceCropNames.length > 3 ? `, and ${observation.sourceCropNames.length - 3} more` : ''}</p>
+                    <a href={observation.source.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex font-semibold text-[#86EFAC] underline underline-offset-2">{observation.source.title}</a>
+                    <p>{observation.source.publisher} · published {observation.source.publicationYear} · {observation.source.license}</p>
+                  </div>
+                </article>;
+              })}
             </section>
           </>
         )}
@@ -387,47 +539,53 @@ export const SeasonSenseScreen: React.FC = () => {
               <div className="p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-[#A1A7A3]">Crop calendar · {activeLga.name}, {activeState.name}</p>
                 <h1 className="mt-1 text-xl font-bold text-white">{selectedCrop.crop}</h1>
-                <p className="mt-2 text-xs leading-relaxed text-[#D1D5DB]">This draft entry lists {selectedCrop.activity === 'plant' ? 'planting' : 'harvest'} during {titleCase(selectedCrop.season).toLowerCase()} for the {activeZone} zone.</p>
+                <p className="mt-2 text-xs leading-relaxed text-[#D1D5DB]">This source lists a broad {selectedCrop.activity === 'plant' ? 'planting' : 'harvest'} period for the {activeZone} zone. Status: {planningWindowStatus(selectedCrop.status)}. It does not assess this farm.</p>
               </div>
             </article>
 
             <section className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4">
-              <h2 className="text-sm font-bold text-white">Calendar period</h2>
-              <p className="mt-2 text-xs font-semibold text-[#BBF7D0]">{selectedCrop.activity === 'plant' ? 'Plant' : 'Harvest'} · {new Intl.DateTimeFormat('en-NG', { month: 'long', timeZone: 'Africa/Lagos' }).format(new Date(Date.UTC(2024, selectedCrop.month - 1, 15)))} · {titleCase(selectedCrop.season)}</p>
-              <p className="mt-1 text-xs leading-relaxed text-[#D1D5DB]">This is a broad zone-level calendar entry. It does not confirm the right date for your field.</p>
+              <h2 className="text-sm font-bold text-white">Source period · {titleCase(selectedCrop.status)}</h2>
+              <p className="mt-2 text-xs font-semibold text-[#BBF7D0]">{planningMonthRange(selectedCrop)} · {titleCase(selectedCrop.season)}</p>
+              <p className="mt-1 text-xs leading-relaxed text-[#D1D5DB]">This is a broad zone-level source window. It does not confirm when to plant in your field.</p>
+              <p className="mt-2 text-xs leading-relaxed text-[#A1A7A3]">Source area: {selectedCrop.evidenceScope}</p>
+              <p className="mt-2 text-xs leading-relaxed text-[#A1A7A3]">{selectedCrop.reviewNotes}</p>
+              {selectedCrop.sources.map((source) => <div key={source.key} className="mt-3 text-xs leading-relaxed text-[#A1A7A3]">
+                <a href={source.url} target="_blank" rel="noreferrer" className="font-semibold text-[#86EFAC] underline underline-offset-2">{source.title}</a>
+                <p>{source.publisher} · {source.publicationYear} · {source.license}</p>
+              </div>)}
             </section>
+            {activeLga.needsReview && <p role="note" className="rounded-2xl border border-[#70403B] bg-[#382321] p-4 text-xs leading-relaxed text-[#F2D1CE]">The LGA zone assignment needs local review. Do not use either the broad source window or the example below as a field decision.</p>}
+            {sourceCropGuide && <SeasonPlanningDemoSections plan={sourceCropGuide} />}
+            {!sourceCropGuide && <section className="rounded-2xl border border-[#70403B] bg-[#382321] p-4"><h2 className="text-sm font-bold text-white">Risks and limits</h2><p className="mt-2 text-xs leading-relaxed text-[#F2D1CE]">The source window is draft data and does not account for your field, soil, previous crop, variety, or current rainfall. Confirm decisions with a local extension worker.</p></section>}
 
-            <section className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4">
-              <h2 className="text-sm font-bold text-white">Conditions to check</h2>
-              <ul className="mt-3 space-y-2">{[
-                'Check that rains or irrigation provide enough water for this crop.',
-                'Consider your soil, seed variety, and the crop grown in this field last season.',
-                ...(activeLga.needsReview ? ['The LGA farming-zone assignment is approximate and needs local review.'] : []),
-              ].map((item) => <li key={item} className="flex gap-2 text-xs leading-relaxed text-[#D1D5DB]"><span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[#22C55E]" aria-hidden="true" />{item}</li>)}</ul>
-            </section>
-
-            <section className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4">
-              <h2 className="text-sm font-bold text-white">Practical guidance</h2>
-              <p className="mt-3 text-xs leading-relaxed text-[#D1D5DB]">Ask your local agricultural extension worker to check the crop, planting period, and rotation for your area.</p>
-            </section>
-
-            <section className="rounded-2xl border border-[#70403B] bg-[#382321] p-4">
-              <h2 className="text-sm font-bold text-white">Risks and limits</h2>
-              <ul className="mt-2 space-y-2"><li className="text-xs leading-relaxed text-[#F2D1CE]">• The calendar is draft data and has not been verified by an agronomist.</li><li className="text-xs leading-relaxed text-[#F2D1CE]">• Zone assignments are approximate and may not reflect conditions on your farm.</li></ul>
-            </section>
-
-            <button type="button" onClick={returnToRecommendations} className="flex min-h-11 w-full items-center justify-center rounded-xl bg-[#292C2A] text-sm font-semibold text-white hover:bg-[#383B39]">Back to recommendations</button>
+            <button type="button" onClick={returnHomeFromPlanning} className="flex min-h-11 w-full items-center justify-center rounded-xl bg-[#292C2A] text-sm font-semibold text-white hover:bg-[#383B39]">Back to home</button>
           </>
         )}
 
-        {screen === 'details' && !selectedCrop && activeLocation && (
+        {screen === 'details' && selectedDemoCrop && activeState && activeLga && activeZone && (
+          <>
+            <article className="overflow-hidden rounded-2xl border border-[#66542E] bg-[#292C2A]">
+              {getCropPreviewImage(selectedDemoCrop.crop) && <img src={getCropPreviewImage(selectedDemoCrop.crop)} alt={`${selectedDemoCrop.crop} plant`} className="h-40 w-full bg-[#181B19] object-cover" />}
+              <div className="p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-[#A1A7A3]">Illustrative guide · {activeLga.name}, {activeState.name}</p>
+                <h1 className="mt-1 text-xl font-bold text-white">{selectedDemoCrop.crop}</h1>
+                <p className="mt-2 text-xs leading-relaxed text-[#D1D5DB]">Example for {activeZone}. It is not verified and does not use current field, soil, or weather measurements.</p>
+              </div>
+            </article>
+            <SeasonPlanningDemoSections plan={selectedDemoCrop} />
+            {activeLga.needsReview && <p role="note" className="rounded-2xl border border-[#70403B] bg-[#382321] p-4 text-xs leading-relaxed text-[#F2D1CE]">This LGA's farming-zone assignment needs review. Ask a local extension worker to confirm the zone before using even this illustrative guide for planning.</p>}
+            <button type="button" onClick={returnHomeFromPlanning} className="flex min-h-11 w-full items-center justify-center rounded-xl bg-[#292C2A] text-sm font-semibold text-white hover:bg-[#383B39]">Back to home</button>
+          </>
+        )}
+
+        {screen === 'details' && !selectedCrop && !selectedDemoCrop && activeLocation && (
           <div className="rounded-2xl border border-[#323633] bg-[#292C2A] p-4 text-xs leading-relaxed text-[#D1D5DB]">
-            <p>{loadingRecommendations ? 'Loading crop calendar…' : 'That crop is not available in this calendar.'}</p>
-            <button type="button" onClick={returnToRecommendations} className="mt-3 font-semibold text-[#22C55E]">Back to recommendations</button>
+            <p>{loadingRecommendations ? 'Loading crop guide…' : 'That crop is not available for this verified zone. The zone may need review.'}</p>
+            <button type="button" onClick={returnHomeFromPlanning} className="mt-3 font-semibold text-[#22C55E]">Back to home</button>
           </div>
         )}
 
-        <p className="px-1 pb-2 text-[10px] leading-relaxed text-[#777D78]">These broad planting windows do not account for your previous crop or field conditions. Confirm your rotation with a local agricultural extension worker.</p>
+        <p className="px-1 pb-2 text-[10px] leading-relaxed text-[#777D78]">Published source windows, illustrative demo guides, and historical surveys are kept separate. Confirm crop choice, timing, and rotation with an agricultural extension worker.</p>
       </main>
     </div>
   );

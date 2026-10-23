@@ -15,6 +15,7 @@ export class AssessmentRequestError extends Error {
 export async function requestCropAssessment(input: {
   image: Blob;
   cropType: CropType;
+  customCropName?: string;
   observations: string;
   scanId: string;
   idToken: string;
@@ -23,6 +24,7 @@ export async function requestCropAssessment(input: {
   const form = new FormData();
   form.append('image', input.image, 'crop-photo');
   form.append('cropType', input.cropType);
+  if (input.customCropName) form.append('customCropName', input.customCropName.trim());
   form.append('observations', input.observations);
   form.append('scanId', input.scanId);
 

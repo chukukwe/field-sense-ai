@@ -60,9 +60,23 @@ The API requires `SUPABASE_URL`, either `SUPABASE_SECRET_KEY` or the legacy `SUP
 
 SeasonSense is available to signed-in users at `/season-sense` and from the existing hamburger menu. The home promotion links there; the existing crop scan remains available from the Home screen's **Scan a Crop** action.
 
-SeasonSense uses the selected state and LGA to show crop-calendar entries for its mapped farming zone. Calendar entries are marked as draft until verified. A separate NiMet panel adds seasonal rainfall context when an exact state/LGA/year record is available; weather data does not choose crops. The older authenticated Open-Meteo forecast endpoint remains separate from this screen.
+SeasonSense uses the selected state and LGA to show two different kinds of crop information. Historical crop reports describe past household survey observations. Draft planting windows are broad zone-level dates transcribed from a published crop calendar. Neither is a verified, farm-specific recommendation. A separate NiMet panel adds seasonal rainfall context when an exact state/LGA/year record is available; weather does not choose crops. Missing crop or rainfall data shows as unavailable instead of borrowing dates from another zone. The older authenticated Open-Meteo forecast endpoint remains separate from this screen.
 
 SeasonSense does not use Gemini to generate crop recommendations. NiMet errors or missing records do not hide otherwise available crop-calendar entries.
+
+### Historical crop timing dataset
+
+The LGA zone key now comes from NAERLS' [States in Nigeria by Ecological Zone](https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en) list, using its state defaults and only the LGA exceptions it names. Latitude and coastline guesses are not used for crop-calendar lookup. The source does not state a reuse license, so attribution and the source URL are recorded; confirm reuse terms before redistribution. Its Humid Forest subtypes are not mapped to individual LGAs and remain merged into the broad Humid Forest category. Source-name mismatches with a safe canonical match are review-flagged. Eight exceptions have no safe destination zone and stay unverified; a total of 89 LGA mappings are currently flagged for local review. No crop windows are returned for those locations.
+
+The separate [African Crop Calendar dataset](https://doi.org/10.6084/m9.figshare.28659557), derived from LSMS-ISA household plot surveys, contains 19,322 grouped planting/harvest observations for 56 crop types across 469 Nigerian LGAs. These are reports from the 2015, 2018, and 2023 survey waves, not forecasts or planting recommendations; survey samples grouped by LGA are not representative LGA estimates. Exact normalized state/LGA matching is used, and unmatched names are excluded rather than guessed. The imported data retains original crop labels, survey years, evidence counts, source URL, and geographic scope. The CSV is licensed CC BY 4.0.
+
+The zone calendar uses the University of Bonn ZEF Dataverse [Crop calender of Maize & Cassava in Nigeria](https://bonndata.uni-bonn.de/dataset.xhtml?persistentId=doi:10.60507/FK2/PI929D), licensed under ODC-By 1.0. Only its explicit March–August sowing ranges are imported. Rates and harvest dates are not shown. Entries remain marked `draft` and are rendered as source windows, not “plant now” recommendations. Raw source rows exist for four of the seven broad NAERLS zones—Derived Savanna, Humid Forest, Northern Guinea Savanna, and Southern Guinea Savanna—for maize and cassava. The Humid Forest rows are withheld because the source only says “parts” of named states and does not identify the covered LGAs. Three zones currently have usable draft windows for mapped, non-review LGAs: Derived Savanna (188 LGAs), Northern Guinea Savanna (55), and Southern Guinea Savanna (51). Sahel, Sudan, and Mid-altitude have no usable window in this source. A Borno-only Sahelian row was excluded because the source does not identify which Borno LGAs it covers. The source does not support specific current-month or harvest advice. No zone has verified planting recommendations.
+
+To reproduce the imports after changing the source files, run `npm --prefix server run season:zones-import`, then `npm --prefix server run season:bonn-calendar-import`. These update `server/data/recommendations.db`; the checked-in database contains the current zone provenance and draft calendar rows.
+
+All 277 generic drafts and four Akwa Ibom pilot calendar rows were archived in `crop_calendar_archive` during schema migration 2. Their active recommendation rows were removed; the pilot review notes were archived separately. All 774 canonical LGAs remain. 469 have matched historical observations; 305 currently show no usable location-level observations. The Bonn zone-level draft rows are separate from these LGA historical observations. The previous pilot importer is blocked after migration 2 so it cannot reintroduce retired rows.
+
+To regenerate the derived seed from the public CSV and lookup, run `npm --prefix server run season:calendar-prepare`. This streams the source, performs exact canonical state/LGA matching, and writes `server/data/african-crop-calendar-sourced.json`. To import it, back up the database and run `npm --prefix server run season:calendar-import`. Importing is repeatable; inspect the generated counts and run SQLite integrity checks before distributing an updated database.
 
 Legacy SeasonSense farm-plan records, if present, are not read, migrated, overwritten, or deleted by the current recommendation feature. No current app workflow uses or exposes those records.
 
@@ -75,6 +89,14 @@ SeasonSense can request NiMet seasonal rainfall predictions for the selected sta
 The backend reads the secret from `NIMET_API_KEY` and sends it in the `x-api-key` header. Never put this key in the frontend or a `VITE_*` variable.
 
 For local development, copy `server/.env.example` to `server/.env`, add your value after `NIMET_API_KEY=`, and restart the backend. `server/.env` is ignored by Git.
+
+### Scan retries, custom crops, and Nigerian Pidgin
+
+Failed assessments can be retried from Scan Details with the existing scan ID and saved image. Cloud-photo upload is a separate operation; a failed upload keeps the local copy and does not cancel an otherwise valid assessment. Choose **Others** to enter a crop name; the server validates it and includes that name in the assessment prompt while retaining the canonical crop type in the scan record.
+
+Assessment results can be translated to Nigerian Pidgin through the authenticated backend route `/api/assessment/translate-pidgin`. The translation is temporary display text; the saved English assessment remains canonical. The server keeps structured severity and confidence fields and rejects translations that change numbers. Browser speech playback is offered only when the browser reports a Nigerian Pidgin voice.
+
+The active LGA zone lookup uses the NAERLS ecological-zone list and its named LGA exceptions; legacy latitude/coastal estimates are not used by the recommendation API. Eight source exceptions cannot be matched safely to a current LGA and remain unverified; 89 LGAs are flagged for local review, and locations with unverified or review-flagged mappings receive no zone dates. The imported African Crop Calendar records remain historical household survey reports, separate from draft zone planting windows.
 
 For production, open the FieldVoice backend service in the [Render Dashboard](https://dashboard.render.com/), select **Environment**, add `NIMET_API_KEY` under **Environment Variables**, and save. Do not add this key to Netlify. Render applies saved environment variables on the next deploy or restart; the key is not changed by this repository update.
 

@@ -156,6 +156,22 @@ test('scan metadata validation, path binding, and owner isolation remain enforce
   await assertDeniedWithoutRuleEvaluationError(deleteDoc(anonymousRef), 'unauthenticated scan deletion');
 });
 
+test('custom crop names are bounded, belong only to Other scans, and remain owner-scoped', async () => {
+  const ownerDb = testEnv.authenticatedContext('farmer-a').firestore();
+  const customCropRef = doc(ownerDb, 'users', 'farmer-a', 'scans', 'custom-crop');
+  await assertSucceeds(setDoc(customCropRef, scan({ cropType: 'Other', customCropName: 'Okra' })));
+  assert.equal((await assertSucceeds(getDoc(customCropRef))).data()?.customCropName, 'Okra');
+
+  await assertFails(setDoc(doc(ownerDb, 'users', 'farmer-a', 'scans', 'wrong-crop'), scan({ customCropName: 'Okra' })));
+  await assertFails(setDoc(doc(ownerDb, 'users', 'farmer-a', 'scans', 'blank-name'), scan({ cropType: 'Other', customCropName: '' })));
+  await assertFails(setDoc(doc(ownerDb, 'users', 'farmer-a', 'scans', 'long-name'), scan({ cropType: 'Other', customCropName: 'a'.repeat(81) })));
+  const otherDb = testEnv.authenticatedContext('farmer-b').firestore();
+  await assertDeniedWithoutRuleEvaluationError(
+    setDoc(doc(otherDb, 'users', 'farmer-a', 'scans', 'custom-crop'), scan({ cropType: 'Other', customCropName: 'Okra' })),
+    'cross-user custom crop write',
+  );
+});
+
 test('Rules test harness is fixed to the demo project and never the production project', () => {
   assert.equal(DEMO_PROJECT_ID, 'demo-fieldvoice-rules-test');
   assert.notEqual(DEMO_PROJECT_ID, 'fieldvoice-ai-4bed1');

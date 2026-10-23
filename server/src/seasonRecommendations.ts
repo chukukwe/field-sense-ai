@@ -2,6 +2,12 @@ import { existsSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { listLgaCalendarData } from './seasonCalendarSource.js';
+import type { LgaCalendarData } from './seasonCalendarSource.js';
+import { listZonePlanningWindows } from './bonnCropCalendar.js';
+import type { ZonePlanningWindow } from './bonnCropCalendar.js';
+import { readZoneSourceReference } from './seasonZoneMapping.js';
+import type { ZoneSourceReference } from './seasonZoneMapping.js';
 
 export interface RecommendationState {
   id: number;
@@ -14,8 +20,8 @@ export interface RecommendationLga {
   name: string;
   latitude: number;
   longitude: number;
-  zone: { code: string; name: string; rainySeasonType: 'bimodal' | 'unimodal' };
-  zoneSource: string;
+  zone: { code: string; name: string; rainySeasonType: 'bimodal' | 'unimodal' | 'unknown' };
+  zoneSource: ZoneSourceReference | null;
   needsReview: boolean;
 }
 
@@ -26,8 +32,13 @@ export interface CropCalendarEntry {
   season: string;
   activity: 'plant' | 'harvest';
   month: number;
-  status: 'draft' | 'verified';
+  status: 'sourced';
   source: string;
+  farmingSystem?: string;
+  variety?: string;
+  evidenceScope?: string;
+  reviewNotes?: string;
+  sources: Array<{ key: string; title: string; publisher: string; url: string; publicationYear: number; geographicScope: string }>;
 }
 
 export interface LgaSeasonPlan {
@@ -35,9 +46,9 @@ export interface LgaSeasonPlan {
     lgaId: number;
     lga: string;
     state: string;
-    zone: { code: string; name: string; rainySeasonType: 'bimodal' | 'unimodal' };
+    zone: { code: string; name: string; rainySeasonType: 'bimodal' | 'unimodal' | 'unknown' };
     coordinates: { latitude: number; longitude: number };
-    zoneSource: string;
+    zoneSource: ZoneSourceReference | null;
     zoneNeedsReview: boolean;
   };
   calendar: {
@@ -46,9 +57,20 @@ export interface LgaSeasonPlan {
     nextMonth: number;
     nextMonthName: string;
     timeZone: 'Africa/Lagos';
-    status: 'draft' | 'mixed' | 'verified';
+    status: 'sourced' | 'unavailable';
     notice: string;
   };
+  locationReview: null;
+  zoneRecommendations: {
+    zoneCode: string;
+    zoneName: string;
+    scope: 'agroecological-zone';
+    status: 'source_window' | 'unavailable';
+    source: ZoneSourceReference | null;
+    message: string;
+  };
+  planningWindows: ZonePlanningWindow[];
+  cropTiming: LgaCalendarData;
   plantNow: CropCalendarEntry[];
   harvestNow: CropCalendarEntry[];
   plantNextMonth: CropCalendarEntry[];
@@ -86,56 +108,54 @@ function getLagosMonth(date: Date): { month: number; name: string } {
   return { month, name };
 }
 
-function readCalendarEntries(rows: Array<Record<string, unknown>>): CropCalendarEntry[] {
-  return rows.map((row) => ({
-    crop: String(row.crop),
-    category: String(row.category),
-    ...(typeof row.local_names === 'string' && row.local_names.length > 0 ? { localNames: row.local_names } : {}),
-    season: String(row.season_label),
-    activity: row.activity as 'plant' | 'harvest',
-    month: Number(row.month),
-    status: row.status as 'draft' | 'verified',
-    source: String(row.source),
-  }));
-}
-
 export function createSeasonRecommendationService(databasePath = findDatabasePath()): SeasonRecommendationService {
   const database = new DatabaseSync(databasePath, { readOnly: true });
   database.exec('PRAGMA query_only = ON');
 
   const stateQuery = database.prepare('SELECT id, code, name FROM states ORDER BY name');
   const lgaQuery = database.prepare(`
-    SELECT l.id, l.name, l.latitude, l.longitude, l.zone_id, l.zone_source, l.needs_review,
-      z.code AS zone_code, z.name AS zone_name, z.rainy_season_type
+    SELECT l.id, l.name, l.latitude, l.longitude, za.zone_id, za.status AS assignment_status,
+      za.needs_review AS assignment_needs_review, za.review_note AS assignment_review_note,
+      z.code AS zone_code, z.name AS zone_name, z.rainy_season_type,
+      zs.source_key,zs.title AS source_title,zs.publisher AS source_publisher,zs.url AS source_url,
+      zs.publication_year AS source_publication_year,zs.license AS source_license
     FROM lgas l
-    JOIN zones z ON z.id = l.zone_id
+    LEFT JOIN lga_zone_assignments za ON za.lga_id = l.id
+    LEFT JOIN zones z ON z.id = za.zone_id
+    LEFT JOIN zone_mapping_sources zs ON zs.source_key = za.source_key
     WHERE l.state_id = ?
     ORDER BY l.name
   `);
   const locationQuery = database.prepare(`
-    SELECT l.id, l.name, l.latitude, l.longitude, l.zone_id, l.zone_source, l.needs_review,
+    SELECT l.id, l.name, l.latitude, l.longitude, za.zone_id, za.status AS assignment_status,
+      za.needs_review AS assignment_needs_review, za.review_note AS assignment_review_note,
       s.id AS state_id, s.code AS state_code, s.name AS state_name,
-      z.code AS zone_code, z.name AS zone_name, z.rainy_season_type
+      z.code AS zone_code, z.name AS zone_name, z.rainy_season_type,
+      zs.source_key,zs.title AS source_title,zs.publisher AS source_publisher,zs.url AS source_url,
+      zs.publication_year AS source_publication_year,zs.license AS source_license
     FROM lgas l
     JOIN states s ON s.id = l.state_id
-    JOIN zones z ON z.id = l.zone_id
+    LEFT JOIN lga_zone_assignments za ON za.lga_id = l.id
+    LEFT JOIN zones z ON z.id = za.zone_id
+    LEFT JOIN zone_mapping_sources zs ON zs.source_key = za.source_key
     WHERE l.id = ?
   `);
-  const cropQuery = database.prepare(`
-    SELECT c.name AS crop, c.category, c.local_names, cc.season_label, cc.activity,
-      cc.month, cc.status, cc.source
-    FROM crop_calendar cc
-    JOIN crops c ON c.id = cc.crop_id
-    WHERE cc.zone_id = ? AND cc.activity = ? AND cc.month = ?
-    ORDER BY c.name, cc.season_label
-  `);
-  const calendarTotals = database.prepare(`
-    SELECT COUNT(*) AS total,
-      SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft,
-      SUM(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) AS verified
-    FROM crop_calendar
-  `).get() as { total: number; draft: number; verified: number };
-
+  const readLgaRecord = (row: Record<string, unknown>): RecommendationLga => {
+    const mapped = row.assignment_status === 'mapped' && typeof row.zone_code === 'string';
+    return {
+      id: Number(row.id),
+      name: String(row.name),
+      latitude: Number(row.latitude),
+      longitude: Number(row.longitude),
+      zone: {
+        code: mapped ? String(row.zone_code) : 'UNVERIFIED',
+        name: mapped ? String(row.zone_name) : 'Zone not verified',
+        rainySeasonType: mapped ? row.rainy_season_type as 'bimodal' | 'unimodal' : 'unknown',
+      },
+      zoneSource: typeof row.source_key === 'string' ? readZoneSourceReference(row) : null,
+      needsReview: !mapped || Number(row.assignment_needs_review) === 1,
+    };
+  };
   return {
     listStates() {
       return stateQuery.all().map((row) => ({ id: Number(row.id), code: String(row.code), name: String(row.name) }));
@@ -144,19 +164,7 @@ export function createSeasonRecommendationService(databasePath = findDatabasePat
       const stateRow = database.prepare('SELECT id, code, name FROM states WHERE id = ?').get(stateId);
       if (!stateRow) return null;
       const state: RecommendationState = { id: Number(stateRow.id), code: String(stateRow.code), name: String(stateRow.name) };
-      const lgas = lgaQuery.all(stateId).map((row) => ({
-        id: Number(row.id),
-        name: String(row.name),
-        latitude: Number(row.latitude),
-        longitude: Number(row.longitude),
-        zone: {
-          code: String(row.zone_code),
-          name: String(row.zone_name),
-          rainySeasonType: row.rainy_season_type as 'bimodal' | 'unimodal',
-        },
-        zoneSource: String(row.zone_source),
-        needsReview: Number(row.needs_review) === 1,
-      }));
+      const lgas = (lgaQuery.all(stateId) as Array<Record<string, unknown>>).map(readLgaRecord);
       return { state, lgas };
     },
     getPlan(lgaId, date = new Date()) {
@@ -166,30 +174,29 @@ export function createSeasonRecommendationService(databasePath = findDatabasePat
       const nextMonth = month === 12 ? 1 : month + 1;
       const nextMonthName = new Intl.DateTimeFormat('en', { timeZone: 'Africa/Lagos', month: 'long' })
         .format(new Date(Date.UTC(2024, nextMonth - 1, 15)));
-      const read = (activity: 'plant' | 'harvest', targetMonth: number) => readCalendarEntries(
-        cropQuery.all(Number(row.zone_id), activity, targetMonth),
-      );
-      const plantNow = read('plant', month);
-      const harvestNow = read('harvest', month);
-      const plantNextMonth = read('plant', nextMonth);
-      const status = calendarTotals.draft === calendarTotals.total
-        ? 'draft'
-        : calendarTotals.draft > 0 && calendarTotals.verified > 0
-          ? 'mixed'
-          : 'verified';
+      const cropTiming = listLgaCalendarData(database, lgaId);
+      const assignmentMapped = row.assignment_status === 'mapped' && typeof row.zone_id === 'number';
+      const zoneUsable = assignmentMapped && Number(row.assignment_needs_review) !== 1;
+      const zoneWindows: ZonePlanningWindow[] = zoneUsable
+        ? listZonePlanningWindows(database, Number(row.zone_id)) : [];
+      const planningWindows = zoneWindows.filter((window) => window.scopeStatus === 'broad_zone');
+      const hasUnresolvedSourceScope = zoneWindows.length > 0 && planningWindows.length === 0;
+      const recommendationSource = planningWindows[0]?.sources[0] ?? null;
+      const zoneSource = typeof row.source_key === 'string' ? readZoneSourceReference(row) : null;
+      const zoneCode = assignmentMapped ? String(row.zone_code) : 'UNVERIFIED';
+      const zoneName = assignmentMapped ? String(row.zone_name) : 'Zone not verified';
+      const plantNow: CropCalendarEntry[] = [];
+      const harvestNow: CropCalendarEntry[] = [];
+      const plantNextMonth: CropCalendarEntry[] = [];
       return {
         location: {
           lgaId: Number(row.id),
           lga: String(row.name),
           state: String(row.state_name),
-          zone: {
-            code: String(row.zone_code),
-            name: String(row.zone_name),
-            rainySeasonType: row.rainy_season_type as 'bimodal' | 'unimodal',
-          },
+          zone: { code: zoneCode, name: zoneName, rainySeasonType: assignmentMapped ? row.rainy_season_type as 'bimodal' | 'unimodal' : 'unknown' },
           coordinates: { latitude: Number(row.latitude), longitude: Number(row.longitude) },
-          zoneSource: String(row.zone_source),
-          zoneNeedsReview: Number(row.needs_review) === 1,
+          zoneSource,
+          zoneNeedsReview: !zoneUsable,
         },
         calendar: {
           month,
@@ -197,18 +204,35 @@ export function createSeasonRecommendationService(databasePath = findDatabasePat
           nextMonth,
           nextMonthName,
           timeZone: 'Africa/Lagos' as const,
-          status,
-          notice: status === 'verified'
-            ? 'Crop timing still depends on local conditions and variety. Confirm with a local extension worker.'
-            : 'This crop calendar contains draft data that has not been verified. Do not use it as planting advice.',
+          status: cropTiming.status,
+          notice: cropTiming.status === 'sourced'
+            ? 'These are historical crop observations from survey households, not planting advice or a forecast.'
+            : 'No reliable crop timing data is available for this LGA yet.',
         },
+        locationReview: null,
+        zoneRecommendations: {
+          zoneCode,
+          zoneName,
+          scope: 'agroecological-zone',
+          status: planningWindows.length > 0 ? 'source_window' : 'unavailable',
+          source: recommendationSource,
+          message: !zoneUsable
+            ? 'This LGA zone assignment is unverified or needs review. No crop dates are shown.'
+            : planningWindows.length > 0
+              ? 'A draft source window is available for this broad farming zone. It is not verified planting advice.'
+              : hasUnresolvedSourceScope
+                ? 'A published source has dates for this zone, but does not identify which local areas they cover. No dates are shown for this LGA.'
+                : 'No source-backed planting window is available for this zone yet. We will not guess.',
+        },
+        planningWindows,
+        cropTiming,
         plantNow,
         harvestNow,
         plantNextMonth,
         emptyMessages: {
-          ...(plantNow.length === 0 ? { plantNow: 'No planting window is listed for this zone this month.' } : {}),
-          ...(harvestNow.length === 0 ? { harvestNow: 'No harvest window is listed for this zone this month.' } : {}),
-          ...(plantNextMonth.length === 0 ? { plantNextMonth: 'No planting window is listed for this zone next month.' } : {}),
+          plantNow: 'Historical survey data does not tell us what to plant this month.',
+          harvestNow: 'Historical survey data does not tell us what to harvest this month.',
+          plantNextMonth: 'Historical survey data does not tell us what to plant next month.',
         },
       };
     },

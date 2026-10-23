@@ -9,9 +9,32 @@ export interface SeasonDatabaseLga {
   name: string;
   latitude: number;
   longitude: number;
-  zone: { code: string; name: string; rainySeasonType: 'bimodal' | 'unimodal' };
-  zoneSource: string;
+  zone: { code: string; name: string; rainySeasonType: 'bimodal' | 'unimodal' | 'unknown' };
+  zoneSource: SeasonZoneSource | null;
   needsReview: boolean;
+}
+
+export interface SeasonZoneSource {
+  key: string;
+  title: string;
+  publisher: string;
+  url: string;
+  publicationYear: number;
+  license: string;
+}
+
+export interface SeasonPlanningWindow {
+  crop: string;
+  category: string;
+  season: string;
+  activity: 'plant' | 'harvest';
+  monthStart: number;
+  monthEnd: number;
+  status: 'draft' | 'reviewed' | 'verified';
+  farmingSystem: string;
+  evidenceScope: string;
+  reviewNotes: string;
+  sources: Array<SeasonDatabaseEntry['sources'][number]>;
 }
 
 export interface SeasonDatabaseEntry {
@@ -21,8 +44,13 @@ export interface SeasonDatabaseEntry {
   season: string;
   activity: 'plant' | 'harvest';
   month: number;
-  status: 'draft' | 'verified';
+  status: 'draft' | 'reviewed' | 'verified';
   source: string;
+  farmingSystem?: string;
+  variety?: string;
+  evidenceScope?: string;
+  reviewNotes?: string;
+  sources: Array<{ key: string; title: string; publisher: string; url: string; publicationYear: number; geographicScope: string; license?: string; retrievedAt?: string }>;
 }
 
 export interface SeasonDatabasePlan {
@@ -30,9 +58,9 @@ export interface SeasonDatabasePlan {
     lgaId: number;
     lga: string;
     state: string;
-    zone: { code: string; name: string; rainySeasonType: 'bimodal' | 'unimodal' };
+    zone: { code: string; name: string; rainySeasonType: 'bimodal' | 'unimodal' | 'unknown' };
     coordinates: { latitude: number; longitude: number };
-    zoneSource: string;
+    zoneSource: SeasonZoneSource | null;
     zoneNeedsReview: boolean;
   };
   calendar: {
@@ -41,8 +69,28 @@ export interface SeasonDatabasePlan {
     nextMonth: number;
     nextMonthName: string;
     timeZone: 'Africa/Lagos';
-    status: 'draft' | 'mixed' | 'verified';
+    status: 'sourced' | 'unavailable';
     notice: string;
+  };
+  locationReview: { lgaId: number; status: 'reviewed'; note: string } | null;
+  zoneRecommendations: { zoneCode: string; zoneName: string; scope: 'agroecological-zone'; status: 'source_window' | 'unavailable'; source: SeasonZoneSource | null; message: string };
+  planningWindows: SeasonPlanningWindow[];
+  cropTiming: {
+    status: 'sourced' | 'unavailable';
+    message?: string;
+    observations: Array<{
+      crop: string;
+      category: string;
+      activity: 'plant' | 'harvest';
+      monthStart: number | null;
+      monthEnd: number | null;
+      evidenceCount: number;
+      surveyYears: number[];
+      sourceCropNames: string[];
+      status: 'sourced';
+      geographicScope: string;
+      source: { title: string; publisher: string; url: string; publicationYear: number; license: string };
+    }>;
   };
   plantNow: SeasonDatabaseEntry[];
   harvestNow: SeasonDatabaseEntry[];
@@ -65,6 +113,12 @@ const apiBase = (import.meta.env?.VITE_API_BASE_URL as string | undefined)?.repl
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readZoneSource(value: unknown): value is SeasonZoneSource {
+  return isRecord(value) && typeof value.key === 'string' && typeof value.title === 'string'
+    && typeof value.publisher === 'string' && typeof value.url === 'string' && value.url.startsWith('https://')
+    && Number.isInteger(value.publicationYear) && typeof value.license === 'string';
 }
 
 async function requestJson(path: string, fetcher: typeof fetch): Promise<Record<string, unknown>> {
@@ -102,16 +156,17 @@ function readLga(value: unknown): SeasonDatabaseLga | null {
   if (!isRecord(value) || !isPositiveId(value.id) || typeof value.name !== 'string'
     || typeof value.latitude !== 'number' || !Number.isFinite(value.latitude)
     || typeof value.longitude !== 'number' || !Number.isFinite(value.longitude)
-    || typeof value.zoneSource !== 'string' || typeof value.needsReview !== 'boolean'
+    || typeof value.needsReview !== 'boolean'
     || !isRecord(value.zone) || typeof value.zone.code !== 'string' || typeof value.zone.name !== 'string'
-    || (value.zone.rainySeasonType !== 'bimodal' && value.zone.rainySeasonType !== 'unimodal')) return null;
+    || (value.zone.rainySeasonType !== 'bimodal' && value.zone.rainySeasonType !== 'unimodal' && value.zone.rainySeasonType !== 'unknown')
+    || !(value.zoneSource === null || readZoneSource(value.zoneSource))) return null;
   return {
     id: value.id,
     name: value.name,
     latitude: value.latitude,
     longitude: value.longitude,
     zone: { code: value.zone.code, name: value.zone.name, rainySeasonType: value.zone.rainySeasonType },
-    zoneSource: value.zoneSource,
+    zoneSource: value.zoneSource as SeasonZoneSource | null,
     needsReview: value.needsReview,
   };
 }
@@ -137,26 +192,83 @@ function readEntry(value: unknown): value is SeasonDatabaseEntry {
   return isRecord(value) && typeof value.crop === 'string' && typeof value.category === 'string'
     && typeof value.season === 'string' && (value.activity === 'plant' || value.activity === 'harvest')
     && Number.isInteger(value.month) && Number(value.month) >= 1 && Number(value.month) <= 12
-    && (value.status === 'draft' || value.status === 'verified') && typeof value.source === 'string'
-    && (!('localNames' in value) || typeof value.localNames === 'string');
+    && (value.status === 'draft' || value.status === 'reviewed' || value.status === 'verified') && typeof value.source === 'string'
+    && (!('localNames' in value) || typeof value.localNames === 'string')
+    && Array.isArray(value.sources) && value.sources.every((source) => isRecord(source)
+      && typeof source.key === 'string' && typeof source.title === 'string' && typeof source.publisher === 'string'
+      && typeof source.url === 'string' && source.url.startsWith('https://') && Number.isInteger(source.publicationYear)
+      && typeof source.geographicScope === 'string'
+      && (!('license' in source) || typeof source.license === 'string')
+      && (!('retrievedAt' in source) || (typeof source.retrievedAt === 'string' && !Number.isNaN(Date.parse(source.retrievedAt)))));
 }
 
 export async function fetchLgaSeasonPlan(lgaId: number, fetcher: typeof fetch = fetch): Promise<SeasonDatabasePlan> {
   const body = await requestJson(`/api/season/recommendations/${lgaId}`, fetcher);
   if (!isRecord(body.location) || !isPositiveId(body.location.lgaId) || typeof body.location.lga !== 'string'
+    || body.location.lgaId !== lgaId
     || typeof body.location.state !== 'string' || !isRecord(body.location.zone)
     || typeof body.location.zone.code !== 'string' || typeof body.location.zone.name !== 'string'
+    || !(['bimodal', 'unimodal', 'unknown'] as unknown[]).includes(body.location.zone.rainySeasonType)
+    || !(body.location.zoneSource === null || readZoneSource(body.location.zoneSource))
     || typeof body.location.zoneNeedsReview !== 'boolean'
     || !isRecord(body.calendar) || !Number.isInteger(body.calendar.month) || !Number.isInteger(body.calendar.nextMonth)
     || typeof body.calendar.monthName !== 'string' || typeof body.calendar.nextMonthName !== 'string'
     || body.calendar.timeZone !== 'Africa/Lagos'
-    || (body.calendar.status !== 'draft' && body.calendar.status !== 'mixed' && body.calendar.status !== 'verified')
+    || !(['sourced', 'unavailable'] as unknown[]).includes(body.calendar.status)
     || typeof body.calendar.notice !== 'string') {
     throw new SeasonPlanningApiError('The crop calendar returned incomplete data. Try again.');
   }
   const groups = ['plantNow', 'harvestNow', 'plantNextMonth'] as const;
   for (const key of groups) {
-    if (!Array.isArray(body[key]) || !body[key].every(readEntry)) throw new SeasonPlanningApiError('The crop calendar contains invalid entries. Try again.');
+    if (!Array.isArray(body[key]) || body[key].length !== 0 || !body[key].every(readEntry)) throw new SeasonPlanningApiError('The crop calendar contains unsupported planting recommendations. Try again.');
+  }
+  if (body.locationReview !== null) throw new SeasonPlanningApiError('The crop calendar returned unsupported review data.');
+  if (!isRecord(body.zoneRecommendations)
+    || body.zoneRecommendations.zoneCode !== body.location.zone.code
+    || body.zoneRecommendations.zoneName !== body.location.zone.name
+    || body.zoneRecommendations.scope !== 'agroecological-zone'
+    || !(['source_window', 'unavailable'] as unknown[]).includes(body.zoneRecommendations.status)
+    || !(body.zoneRecommendations.source === null || readZoneSource(body.zoneRecommendations.source))
+    || typeof body.zoneRecommendations.message !== 'string') {
+    throw new SeasonPlanningApiError('The crop calendar returned an invalid zone source status.');
+  }
+  if (!Array.isArray(body.planningWindows) || !body.planningWindows.every((entry) => isRecord(entry)
+    && typeof entry.crop === 'string' && typeof entry.category === 'string' && typeof entry.season === 'string'
+    && (entry.activity === 'plant' || entry.activity === 'harvest')
+    && Number.isInteger(entry.monthStart) && Number(entry.monthStart) >= 1 && Number(entry.monthStart) <= 12
+    && Number.isInteger(entry.monthEnd) && Number(entry.monthEnd) >= Number(entry.monthStart) && Number(entry.monthEnd) <= 12
+    && (entry.status === 'draft' || entry.status === 'reviewed' || entry.status === 'verified')
+    && typeof entry.farmingSystem === 'string' && typeof entry.evidenceScope === 'string'
+    && typeof entry.reviewNotes === 'string' && Array.isArray(entry.sources) && entry.sources.length > 0
+    && entry.sources.every((source) => isRecord(source) && typeof source.key === 'string'
+      && typeof source.title === 'string' && typeof source.publisher === 'string'
+      && typeof source.url === 'string' && source.url.startsWith('https://')
+      && Number.isInteger(source.publicationYear) && typeof source.geographicScope === 'string'
+      && typeof source.license === 'string'
+      && typeof source.retrievedAt === 'string' && !Number.isNaN(Date.parse(source.retrievedAt))))) {
+    throw new SeasonPlanningApiError('The crop calendar returned invalid source-backed windows.');
+  }
+  if ((body.zoneRecommendations.status === 'unavailable' && (body.planningWindows.length !== 0 || body.zoneRecommendations.source !== null))
+    || (body.zoneRecommendations.status === 'source_window' && (body.planningWindows.length === 0 || !readZoneSource(body.zoneRecommendations.source)))) {
+    throw new SeasonPlanningApiError('The source window status does not match the returned calendar entries.');
+  }
+  if (!isRecord(body.cropTiming) || !(['sourced','unavailable'] as unknown[]).includes(body.cropTiming.status)
+    || !Array.isArray(body.cropTiming.observations) || !body.cropTiming.observations.every((item) => isRecord(item)
+      && typeof item.crop === 'string' && typeof item.category === 'string'
+      && (item.activity === 'plant' || item.activity === 'harvest')
+      && (item.monthStart === null || (Number.isInteger(item.monthStart) && Number(item.monthStart) >= 1 && Number(item.monthStart) <= 12))
+      && (item.monthEnd === null || (Number.isInteger(item.monthEnd) && Number(item.monthEnd) >= 1 && Number(item.monthEnd) <= 12))
+      && (item.monthStart !== null || item.monthEnd !== null)
+      && isPositiveId(item.evidenceCount) && Array.isArray(item.surveyYears) && item.surveyYears.every((year) => Number.isInteger(year))
+      && Array.isArray(item.sourceCropNames) && item.sourceCropNames.every((name) => typeof name === 'string')
+      && item.status === 'sourced' && typeof item.geographicScope === 'string' && isRecord(item.source)
+      && typeof item.source.title === 'string' && typeof item.source.publisher === 'string'
+      && typeof item.source.url === 'string' && item.source.url.startsWith('https://')
+      && Number.isInteger(item.source.publicationYear) && typeof item.source.license === 'string')) {
+    throw new SeasonPlanningApiError('The crop calendar returned invalid source records. Try again.');
+  }
+  if (body.cropTiming.status === 'unavailable' && body.cropTiming.observations.length !== 0) {
+    throw new SeasonPlanningApiError('Unavailable crop data cannot include observations. Try again.');
   }
   if (!isRecord(body.emptyMessages)
     || Object.values(body.emptyMessages).some((message) => typeof message !== 'string')) {

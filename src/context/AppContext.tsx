@@ -14,6 +14,7 @@ const initialDraft: ScanDraft = {
   photoPreviewUrl: null,
   photoSizeMb: 0,
   cropType: null,
+  customCropName: '',
   observations: '',
 };
 
@@ -105,8 +106,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const cloudScans = snapshot.docs.map((scanDoc) => ({ ...scanDoc.data(), id: scanDoc.id, dataScope: 'cloud' as const } as ScanItem));
       let localScans: ScanItem[] = [];
       try { localScans = JSON.parse(localStorage.getItem(scansStorageKey) ?? '[]') as ScanItem[]; } catch { /* ignore invalid local cache */ }
+      const mergedCloudScans = cloudScans.map((cloudScan) => {
+        const localScan = localScans.find((scan) => scan.id === cloudScan.id);
+        if (!localScan) return cloudScan;
+        return {
+          ...localScan,
+          ...cloudScan,
+          // The storage key points to this device's original IndexedDB photo;
+          // it must survive the server-created cloud metadata record.
+          photoStorageKey: localScan.photoStorageKey ?? cloudScan.photoStorageKey,
+          photoScope: cloudScan.photoScope ?? localScan.photoScope,
+        };
+      });
       const localOnlyScans = localScans.filter((scan) => scan.dataScope === 'local-only' && !cloudScans.some((cloudScan) => cloudScan.id === scan.id));
-      setScans([...cloudScans, ...localOnlyScans]);
+      setScans([...mergedCloudScans, ...localOnlyScans]);
     }, () => {
       // Continue with the account-scoped local cache when Firestore is unreachable.
     });
@@ -150,7 +163,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       footerStatus: status === 'completed' ? 'Assessment ready'
         : status === 'inconclusive' ? 'Assessment inconclusive'
           : status === 'processing' ? 'Analysis in progress'
-            : status === 'pending' ? 'Assessment pending' : 'Analysis failed',
+            : status === 'pending' ? 'Assessment pending'
+              : status === 'unavailable' ? 'Assessment unavailable' : 'Analysis failed',
       footerActionLabel: status === 'failed' ? 'Retry assessment' : 'View assessment',
     }));
   }, []);
@@ -263,12 +277,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const createScanFromDraft = useCallback((): ScanItem => {
     const id = `scan-${Date.now()}`;
     const crop = scanDraft.cropType ?? 'Cassava';
+    const cropName = crop === 'Other' ? scanDraft.customCropName.trim() : '';
     const previewUrl = scanDraft.photoPreviewUrl ?? '/assets/cassava-leaf-sample.png';
 
     const newScan: ScanItem = {
       id,
-      title: `${crop} Leaf`,
+      title: `${cropName || crop} Leaf`,
       cropType: crop,
+      ...(cropName ? { customCropName: cropName } : {}),
       date: formatScanDate(new Date()),
       status: 'Observation',
       statusVariant: 'amber',

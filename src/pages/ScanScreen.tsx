@@ -14,21 +14,14 @@ import {
 import { TopHeader } from '../components/common/TopHeader';
 import { useApp } from '../context/useApp';
 import type { CropType } from '../types';
-
-const CROP_OPTIONS: Array<{ type: CropType; label: string; sub: string }> = [
-  { type: 'Cassava',    label: 'Cassava',    sub: 'Akpu / Iwa' },
-  { type: 'Plantain',  label: 'Plantain',   sub: 'Banana family' },
-  { type: 'Maize',     label: 'Maize',      sub: 'Corn / Ibokpot' },
-  { type: 'Vegetables', label: 'Vegetables', sub: 'Ugwu / Waterleaf' },
-  { type: 'Other',     label: 'Other',      sub: 'Yam, Palm, etc.' },
-];
+import { cropOptions, validateCropSelection } from '../data/cropFamilies';
 
 export const ScanScreen: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { scanDraft, setScanDraft, resetScanDraft } = useApp();
 
-  const [errorBanner, setErrorBanner] = useState<'no-crop' | 'no-photo' | 'too-large' | 'not-image' | null>(null);
+  const [errorBanner, setErrorBanner] = useState<'crop-required' | 'custom-name-required' | 'custom-name-invalid' | 'no-photo' | 'too-large' | 'not-image' | null>(null);
   const [cameraBlocked, setCameraBlocked] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -115,13 +108,14 @@ export const ScanScreen: React.FC = () => {
   };
 
   const selectCrop = (type: CropType) => {
-    setScanDraft((prev) => ({ ...prev, cropType: type }));
-    if (errorBanner === 'no-crop') setErrorBanner(null);
+    setScanDraft((prev) => ({ ...prev, cropType: type, customCropName: type === 'Other' ? prev.customCropName : '' }));
+    if (errorBanner === 'crop-required' || errorBanner === 'custom-name-required' || errorBanner === 'custom-name-invalid') setErrorBanner(null);
   };
 
   const handleAnalyze = () => {
-    if (!scanDraft.cropType) {
-      setErrorBanner('no-crop');
+    const cropSelectionError = validateCropSelection(scanDraft.cropType, scanDraft.customCropName);
+    if (cropSelectionError) {
+      setErrorBanner(cropSelectionError);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -178,7 +172,7 @@ export const ScanScreen: React.FC = () => {
       <div className="px-4 flex flex-col gap-4">
 
         {/* ── Validation Banners ── */}
-        {errorBanner === 'no-crop' && (
+        {errorBanner === 'crop-required' && (
           <div className="bg-[#2C1A1A] border border-[#5C2020] rounded-2xl p-4 flex gap-3 animate-in fade-in slide-in-from-top-2 duration-150">
             <AlertOctagon className="w-5 h-5 text-[#E04141] shrink-0 mt-0.5" />
             <div>
@@ -346,7 +340,7 @@ export const ScanScreen: React.FC = () => {
           </p>
 
           <div className="grid grid-cols-2 gap-2">
-            {CROP_OPTIONS.map((crop) => {
+            {cropOptions.map((crop) => {
               const active = scanDraft.cropType === crop.type;
               return (
                 <button
@@ -359,11 +353,24 @@ export const ScanScreen: React.FC = () => {
                   }`}
                 >
                   <p className="text-xs font-bold text-white">{crop.label}</p>
-                  <p className="text-[10px] text-[#8F9490] mt-0.5">{crop.sub}</p>
+                  <p className="text-[10px] text-[#8F9490] mt-0.5">{crop.family}</p>
                 </button>
               );
             })}
           </div>
+          {scanDraft.cropType === 'Other' && <label className="mt-3 block text-xs font-semibold text-white">
+            Enter crop name <span className="text-[#E04141]">*</span>
+            <input required maxLength={80} value={scanDraft.customCropName}
+              onChange={(event) => {
+                const value = event.target.value;
+                setScanDraft((prev) => ({ ...prev, customCropName: value }));
+                if (validateCropSelection('Other', value) === null) setErrorBanner((current) => current === 'custom-name-required' || current === 'custom-name-invalid' ? null : current);
+              }}
+              placeholder="Type the name of your crop"
+              className="mt-2 w-full rounded-xl border border-[#3B423E] bg-[#181B19] px-3 py-3 text-xs text-white placeholder:text-[#8F9490] focus:border-[#176B45] focus:outline-none" />
+            {errorBanner === 'custom-name-required' && <span role="alert" className="mt-1 block text-[11px] text-[#FFB4A8]">Enter a crop name to continue.</span>}
+            {errorBanner === 'custom-name-invalid' && <span role="alert" className="mt-1 block text-[11px] text-[#FFB4A8]">Use a crop name of up to 80 characters without angle brackets or control characters.</span>}
+          </label>}
         </div>
 
         {/* ── Observations Input ── */}
