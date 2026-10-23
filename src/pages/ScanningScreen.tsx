@@ -12,7 +12,7 @@ import { uploadCropPhoto } from '../data/photoApi';
 
 export const ScanningScreen: React.FC = () => {
   const navigate = useNavigate();
-  const { scanDraft, createScanFromDraft, saveScan, applyAssessment, markScanFailed } = useApp();
+  const { scanDraft, createScanFromDraft, saveScan, markPhotoSynced, applyAssessment, markScanFailed } = useApp();
   const { user } = useAuth();
   const scanProcessRef = useRef<Promise<string> | null>(null);
   const {
@@ -120,7 +120,10 @@ export const ScanningScreen: React.FC = () => {
               // The assessment request creates the authenticated user's scan
               // record when the initial client-side Firestore save was offline.
               // Sync the same local photo only after that record exists.
-              try { await uploadCropPhoto({ scanId: scan.id, image: localPhoto, idToken }); }
+              try {
+                const cloudPhotoPath = await uploadCropPhoto({ scanId: scan.id, image: localPhoto, idToken });
+                markPhotoSynced(scan.id, cloudPhotoPath);
+              }
               catch { /* The local image remains available; Scan Details retries sync when reopened. */ }
             }
           }
@@ -141,7 +144,7 @@ export const ScanningScreen: React.FC = () => {
       if (active) navigate(`/assessment/${scanId}`);
     });
     return () => { active = false; };
-  }, [navigate, scanDraft.photoFile, scanDraft.cropType, scanDraft.customCropName, scanDraft.observations, createScanFromDraft, saveScan, applyAssessment, markScanFailed, user, startProgress, resumeProgress, setProgressPhase, completeProgress, stopProgress]);
+  }, [navigate, scanDraft.photoFile, scanDraft.cropType, scanDraft.customCropName, scanDraft.observations, createScanFromDraft, saveScan, markPhotoSynced, applyAssessment, markScanFailed, user, startProgress, resumeProgress, setProgressPhase, completeProgress, stopProgress]);
 
   const previewImage = scanDraft.photoPreviewUrl || '/assets/cassava-leaf-sample.png';
   const cropLabel = scanDraft.cropType || 'Cassava';

@@ -26,6 +26,36 @@ const FooterIcon: React.FC<{ icon: ScanItem['footerIcon'] }> = ({ icon }) => {
   return <Clock className="w-3.5 h-3.5 text-gray-400" />;
 };
 
+function getScanCreatedTime(scan: ScanItem): number {
+  const createdAt = (scan as ScanItem & { createdAt?: unknown }).createdAt;
+  if (createdAt instanceof Date) return createdAt.getTime();
+  if (typeof createdAt === 'string' || typeof createdAt === 'number') {
+    const parsed = new Date(createdAt).getTime();
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  if (typeof createdAt === 'object' && createdAt !== null && 'toDate' in createdAt) {
+    const toDate = (createdAt as { toDate?: unknown }).toDate;
+    if (typeof toDate === 'function') {
+      try {
+        const parsed = toDate.call(createdAt);
+        if (parsed instanceof Date && Number.isFinite(parsed.getTime())) return parsed.getTime();
+      } catch { /* use the scan ID or display date as a fallback */ }
+    }
+  }
+
+  // Locally-created scans use the creation time in their ID, which is more
+  // precise than the display date and remains available for local-only scans.
+  const idTimestamp = scan.id.match(/^scan-(\d{10,})$/)?.[1];
+  if (idTimestamp) {
+    const parsed = Number(idTimestamp);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  // Older and sample records may only have a human-readable date.
+  const displayDate = Date.parse(scan.date.replace(/\b(\d{1,2})(st|nd|rd|th)\b/, '$1'));
+  return Number.isFinite(displayDate) ? displayDate : 0;
+}
+
 interface HistoryFilterChipProps {
   label: string;
   count: number;
@@ -60,7 +90,10 @@ export const HistoryScreen: React.FC = () => {
   const plantainCount = scans.filter((s) => s.cropType === 'Plantain').length;
   const hasSampleScans = scans.some((scan) => /^scan-[1-4]$/.test(scan.id));
 
-  const displayed = filter === 'All' ? scans : scans.filter((s) => s.cropType === filter);
+  const displayed = (filter === 'All' ? scans : scans.filter((s) => s.cropType === filter))
+    .map((scan, index) => ({ scan, index, createdTime: getScanCreatedTime(scan) }))
+    .sort((a, b) => b.createdTime - a.createdTime || a.index - b.index)
+    .map(({ scan }) => scan);
 
   return (
     <div className="flex flex-col gap-4 pb-4">

@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Camera, Clock, Trash2, Image as ImageIcon } from 'lucide-react';
+import { Camera, Clock, Trash2, Image as ImageIcon, CloudUpload, CheckCircle2 } from 'lucide-react';
 import { TopHeader } from '../components/common/TopHeader';
 import { ScanImage } from '../components/common/ScanImage';
 import { useApp } from '../context/useApp';
 import { useAuth } from '../context/useAuth';
-import { CropPhotoRequestError, uploadLocalScanPhoto, getCloudCropPhoto } from '../data/photoApi';
+import { CropPhotoRequestError, uploadLocalScanPhoto, uploadCropPhoto, getCloudCropPhoto } from '../data/photoApi';
 import { AssessmentRequestError, requestCropAssessment } from '../data/assessmentApi';
-import { getScanPhoto } from '../data/photoStore';
+import { getScanPhoto, saveScanPhoto } from '../data/photoStore';
 import { usePidginAssessment } from '../data/usePidginAssessment';
 import { PidginAssessmentControls } from '../components/common/PidginAssessmentControls';
 import { simpleConfidence, simpleLikelihood } from '../data/assessmentLanguage';
@@ -16,13 +16,15 @@ import { canOfferSampleCropResult } from '../data/sampleCropResults';
 export const ScanDetailsScreen: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { scans, deleteScan, setActiveModal, applyAssessment, markScanFailed } = useApp();
+  const { scans, deleteScan, setActiveModal, applyAssessment, markScanFailed, markPhotoStoredLocally, markPhotoSynced } = useApp();
   const { user } = useAuth();
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [photoReload, setPhotoReload] = useState(0);
   const [assessmentBusy, setAssessmentBusy] = useState(false);
   const [assessmentMessage, setAssessmentMessage] = useState('');
+  const [photoSyncBusy, setPhotoSyncBusy] = useState(false);
+  const [photoSyncMessage, setPhotoSyncMessage] = useState('');
   const photoInput = useRef<HTMLInputElement>(null);
   const autoUploadAttempt = useRef('');
 
@@ -51,18 +53,36 @@ export const ScanDetailsScreen: React.FC = () => {
     openPickerWhenMissing = true,
   ) => {
     if (!scanToUpload || !authenticatedUser) return;
+    if (!replacement && !scanToUpload.photoStorageKey) {
+      setPhotoSyncMessage('Choose the original photo to save it to your account.');
+      if (openPickerWhenMissing) photoInput.current?.click();
+      return;
+    }
+    setPhotoSyncBusy(true);
+    setPhotoSyncMessage('Saving photo to your account…');
     try {
-      if (!replacement && !scanToUpload.photoStorageKey) {
-        if (openPickerWhenMissing) photoInput.current?.click();
-        return;
+      const photoStorageKey = scanToUpload.photoStorageKey ?? scanToUpload.id;
+      if (replacement) {
+        await saveScanPhoto(photoStorageKey, replacement);
+        autoUploadAttempt.current = `${scanToUpload.id}:${photoStorageKey}`;
+        markPhotoStoredLocally(scanToUpload.id, photoStorageKey);
       }
-      await uploadLocalScanPhoto({ scanId: scanToUpload.id, photoStorageKey: scanToUpload.photoStorageKey ?? scanToUpload.id, idToken: await authenticatedUser.getIdToken(), replacement });
+      const cloudPhotoPath = await uploadLocalScanPhoto({ scanId: scanToUpload.id, photoStorageKey, idToken: await authenticatedUser.getIdToken() });
+      markPhotoSynced(scanToUpload.id, cloudPhotoPath);
+      setPhotoSyncMessage('Photo saved to your account. You can view it when you sign in on another device.');
       setPhotoReload((value) => value + 1);
     } catch (error) {
       const missingLocalPhoto = error instanceof CropPhotoRequestError && error.code === 'LEGACY_PHOTO_MISSING';
+      setPhotoSyncMessage(missingLocalPhoto
+        ? 'Choose the original photo to save it to your account.'
+        : error instanceof CropPhotoRequestError
+          ? error.message
+          : 'The photo could not be saved. Check your connection and retry.');
       if (missingLocalPhoto && openPickerWhenMissing) photoInput.current?.click();
+    } finally {
+      setPhotoSyncBusy(false);
     }
-  }, []);
+  }, [markPhotoStoredLocally, markPhotoSynced]);
 
   // Older scans created before automatic cloud sync are migrated when their
   // original device opens Scan Details. Keep the local bytes as a fallback.
@@ -79,21 +99,24 @@ export const ScanDetailsScreen: React.FC = () => {
     setAssessmentBusy(true);
     setAssessmentMessage('');
     applyAssessment(scan.id, undefined, 'processing', 'Your crop photo is being assessed.');
+    let image: Blob | undefined;
+    let idToken = '';
     try {
-      let image = scan.photoStorageKey ? await getScanPhoto(scan.photoStorageKey) : undefined;
+      image = scan.photoStorageKey ? await getScanPhoto(scan.photoStorageKey) : undefined;
       if (!image && scan.cloudPhotoPath) image = await getCloudCropPhoto({ scanId: scan.id, idToken: await user.getIdToken() });
       if (!image) {
         applyAssessment(scan.id, undefined, 'failed', 'The original photo is unavailable. Choose or capture a photo, then retry the assessment.');
         setAssessmentMessage('The original photo is unavailable. Choose or capture a photo, then retry the assessment.');
         return;
       }
+      idToken = await user.getIdToken();
       const result = await requestCropAssessment({
         image,
         cropType: scan.cropType,
         customCropName: scan.customCropName,
         observations: scan.userObservations ?? '',
         scanId: scan.id,
-        idToken: await user.getIdToken(),
+        idToken,
       });
       applyAssessment(scan.id, result, result.status, result.summary);
     } catch (error) {
@@ -106,6 +129,15 @@ export const ScanDetailsScreen: React.FC = () => {
         await markScanFailed(scan.id, message, failure);
       }
     } finally {
+      // A successful assessment is stored in Firestore, while the image has
+      // its own private Storage upload. Try to complete that link after a
+      // retry too, including when the provider request failed.
+      if (image && idToken && !scan.cloudPhotoPath) {
+        try {
+          const cloudPhotoPath = await uploadCropPhoto({ scanId: scan.id, image, idToken });
+          markPhotoSynced(scan.id, cloudPhotoPath);
+        } catch { /* Scan Details keeps a manual photo-sync action available. */ }
+      }
       setAssessmentBusy(false);
     }
   };
@@ -159,6 +191,42 @@ export const ScanDetailsScreen: React.FC = () => {
           event.currentTarget.value = '';
           if (selected) void uploadExistingPhoto(scan, user, selected);
         }} />
+
+        {scan.cloudPhotoPath ? (
+          <div className="flex items-start gap-2 rounded-xl border border-[#286443] bg-[#1B3427] px-3 py-2.5 text-xs text-[#B8F2D0]" role="status">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#22C55E]" aria-hidden="true" />
+            <div>
+              <p className="font-semibold">Photo saved to your account</p>
+              <p className="mt-0.5 text-[#C6D2CA]">This photo is linked to your account. Your scan record and any completed result sync there too.</p>
+              {!scan.photoStorageKey && <button type="button" onClick={() => setPhotoReload((value) => value + 1)} className="mt-1 font-semibold text-[#6EE7A8] hover:underline">Reload photo</button>}
+            </div>
+          </div>
+        ) : scan.photoStorageKey && scan.photoScope !== 'missing' ? (
+          <div className="rounded-xl border border-[#4B513C] bg-[#292C2A] px-3 py-3">
+            <div className="flex items-start gap-2 text-xs text-[#E7E9E7]">
+              <CloudUpload className="mt-0.5 h-4 w-4 shrink-0 text-[#1EB968]" aria-hidden="true" />
+              <div>
+                <p className="font-semibold">Photo saved on this device</p>
+                <p className="mt-0.5 text-[#A1A7A3]">Sync it to your account so it appears with this scan on your other devices.</p>
+              </div>
+            </div>
+            {photoSyncMessage && <p className="mt-2 text-[11px] text-[#D1D5DB]" role="status">{photoSyncMessage}</p>}
+            <button type="button" onClick={() => void uploadExistingPhoto(scan, user)} disabled={photoSyncBusy || !user}
+              className="mt-3 w-full rounded-xl bg-[#176B45] py-2.5 text-xs font-semibold text-white hover:bg-[#1eb968] disabled:opacity-60">
+              {photoSyncBusy ? 'Saving photo…' : 'Sync photo to my account'}
+            </button>
+          </div>
+        ) : scan.dataScope === 'cloud' && scan.assessmentStatus ? (
+          <div className="rounded-xl border border-[#4B513C] bg-[#292C2A] px-3 py-3">
+            <p className="text-xs font-semibold text-[#E7E9E7]">Your scan record is saved, but no photo is linked yet.</p>
+            <p className="mt-1 text-[11px] text-[#A1A7A3]">Choose the original photo to attach it to your account for access on other devices.</p>
+            {photoSyncMessage && <p className="mt-2 text-[11px] text-[#D1D5DB]" role="status">{photoSyncMessage}</p>}
+            <button type="button" onClick={() => photoInput.current?.click()} disabled={photoSyncBusy || !user}
+              className="mt-3 w-full rounded-xl bg-[#176B45] py-2.5 text-xs font-semibold text-white hover:bg-[#1eb968] disabled:opacity-60">
+              {photoSyncBusy ? 'Saving photo…' : 'Choose original photo'}
+            </button>
+          </div>
+        ) : null}
 
         {scan.assessmentStatus === 'failed' && <section className="rounded-2xl border border-[#B36A2D] bg-[#2E2319] p-4" aria-label="Assessment retry">
           <h3 className="text-sm font-bold text-white">Crop check could not finish</h3>

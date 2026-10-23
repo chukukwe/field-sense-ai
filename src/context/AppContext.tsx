@@ -153,6 +153,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return 'local-only';
   }, [scansStorageKey]);
 
+  const markPhotoStoredLocally = useCallback((scanId: string, photoStorageKey: string) => {
+    setScans((previous) => previous.map((scan) => scan.id !== scanId ? scan : {
+      ...scan,
+      photoStorageKey,
+      photoScope: scan.cloudPhotoPath ? 'cloud' : 'local-only',
+    }));
+  }, []);
+
+  const markPhotoSynced = useCallback((scanId: string, cloudPhotoPath: string) => {
+    setScans((previous) => previous.map((scan) => scan.id !== scanId ? scan : {
+      ...scan,
+      cloudPhotoPath,
+      photoScope: 'cloud',
+    }));
+  }, []);
+
   const applyAssessment = useCallback((scanId: string, assessment: CropAssessment | undefined, status: NonNullable<ScanItem['assessmentStatus']>, summary?: string, failure?: ScanItem['assessmentFailure']) => {
     setScans((previous) => previous.map((scan) => scan.id !== scanId ? scan : {
       ...scan,
@@ -311,6 +327,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setScanDraft,
         resetScanDraft,
         saveScan,
+        markPhotoStoredLocally,
+        markPhotoSynced,
         applyAssessment,
         markScanFailed,
         deleteScan,

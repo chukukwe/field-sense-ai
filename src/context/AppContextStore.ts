@@ -28,6 +28,8 @@ export interface AppContextType {
   setScanDraft: Dispatch<SetStateAction<ScanDraft>>;
   resetScanDraft: () => void;
   saveScan: (scan: ScanItem) => Promise<'cloud' | 'local-only'>;
+  markPhotoStoredLocally: (scanId: string, photoStorageKey: string) => void;
+  markPhotoSynced: (scanId: string, cloudPhotoPath: string) => void;
   applyAssessment: (scanId: string, assessment: CropAssessment | undefined, status: NonNullable<ScanItem['assessmentStatus']>, summary?: string, failure?: ScanItem['assessmentFailure']) => void;
   markScanFailed: (scanId: string, summary: string, failure?: ScanItem['assessmentFailure']) => Promise<void>;
   deleteScan: (id: string) => Promise<boolean>;
