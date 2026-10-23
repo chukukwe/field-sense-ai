@@ -4,7 +4,7 @@ import request from 'supertest';
 import sharp from 'sharp';
 import type { CropAssessmentResult } from '../src/assessmentSchema.js';
 import { createApp, ProviderError, type AnalyzeDependencies } from '../src/app.js';
-import { classifyGeminiFailure, mapGeminiProviderFailure, preservesNumbers } from '../src/gemini.js';
+import { classifyGeminiFailure, mapGeminiProviderFailure, parseGeminiResponseText, preservesNumbers } from '../src/gemini.js';
 
 const png = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#30a060' } }).png().toBuffer();
 const assessment: CropAssessmentResult = {
@@ -45,8 +45,14 @@ describe('Gemini failure diagnostics', () => {
     assert.deepEqual(classifyGeminiFailure(Object.assign(new Error('request cancelled'), { name: 'AbortError' })), {
       category: 'timeout', code: 'REQUEST_TIMEOUT',
     });
+    assert.deepEqual(classifyGeminiFailure(Object.assign(new Error('operation aborted'), { name: 'TimeoutError' })), {
+      category: 'timeout', code: 'REQUEST_TIMEOUT',
+    });
     assert.deepEqual(classifyGeminiFailure(Object.assign(new Error('provider rejected request'), { status: 401 })), {
       category: 'http', code: 'HTTP_RESPONSE', httpStatus: 401,
+    });
+    assert.deepEqual(classifyGeminiFailure(Object.assign(new Error('gateway timed out'), { status: 504 })), {
+      category: 'http', code: 'HTTP_RESPONSE', httpStatus: 504,
     });
   });
 
@@ -62,6 +68,24 @@ describe('Gemini failure diagnostics', () => {
     assert.equal(failure.status, 504);
     assert.equal(failure.retryable, true);
     assert.equal(failure.publicMessage.includes('gateway response'), false);
+  });
+
+  it('keeps quota, credentials, and provider unavailability distinct', () => {
+    for (const [status, code] of [[429, 'GEMINI_QUOTA'], [401, 'GEMINI_AUTH_FAILED'], [403, 'GEMINI_AUTH_FAILED'], [503, 'GEMINI_UNAVAILABLE']] as const) {
+      const failure = mapGeminiProviderFailure(Object.assign(new Error('private upstream detail'), { status }));
+      assert.equal(failure.code, code);
+      assert.equal(failure.status, status === 401 || status === 403 ? 503 : status);
+      assert.equal(failure.publicMessage.includes('private upstream detail'), false);
+      assert.equal(failure.retryable, status === 429 || status === 503);
+    }
+  });
+
+  it('parses valid structured JSON and rejects empty or malformed provider text safely', () => {
+    assert.deepEqual(parseGeminiResponseText('{"summary":"visible symptoms"}'), { summary: 'visible symptoms' });
+    for (const text of [undefined, null, '', '   ']) {
+      assert.throws(() => parseGeminiResponseText(text), (error: unknown) => error instanceof ProviderError && error.code === 'EMPTY_MODEL_RESPONSE');
+    }
+    assert.throws(() => parseGeminiResponseText('{bad json'), (error: unknown) => error instanceof ProviderError && error.code === 'INVALID_MODEL_RESPONSE');
   });
 });
 
@@ -159,13 +183,49 @@ describe('POST /api/analyze-crop', () => {
   });
 
   it('validates and persists a successful result', async () => {
-    const { app, persisted } = setup();
+    let providerMime = '';
+    const { app, persisted } = setup({ assessImage: async (_image, mime) => { providerMime = mime; return assessment; } });
     const response = await request(app).post('/api/analyze-crop').set(auth)
       .field('scanId', 'scan-test').field('cropType', 'Cassava').field('observations', 'Yellowing on lower leaves')
       .attach('image', png, { filename: 'untrusted-name.png', contentType: 'image/png' });
     assert.equal(response.status, 200);
+    assert.equal(providerMime, 'image/png');
     assert.deepEqual(response.body.assessment, assessment);
     assert.deepEqual(persisted, [assessment]);
+  });
+
+  it('accepts supported JPEG, PNG, and WebP photos with matching provider MIME types', async () => {
+    const images = [
+      { mime: 'image/jpeg', bytes: await sharp({ create: { width: 2, height: 2, channels: 3, background: '#30a060' } }).jpeg().toBuffer() },
+      { mime: 'image/png', bytes: png },
+      { mime: 'image/webp', bytes: await sharp({ create: { width: 2, height: 2, channels: 3, background: '#30a060' } }).webp().toBuffer() },
+    ];
+    const providerMimes: string[] = [];
+    const { app } = setup({ claimScan: async () => 'claimed', assessImage: async (_image, mime) => { providerMimes.push(mime); return assessment; } });
+    for (const image of images) {
+      const response = await request(app).post('/api/analyze-crop').set(auth)
+        .field('scanId', 'scan-test').field('cropType', 'Cassava')
+        .attach('image', image.bytes, { filename: 'crop-photo', contentType: image.mime });
+      assert.equal(response.status, 200);
+    }
+    assert.deepEqual(providerMimes, images.map(({ mime }) => mime));
+  });
+
+  it('normalizes a large valid photo to a bounded JPEG before assessment', async () => {
+    const largePng = await sharp({ create: { width: 3000, height: 2000, channels: 3, background: '#30a060' } }).png().toBuffer();
+    let providerImage: Buffer | undefined;
+    let providerMime = '';
+    const { app } = setup({ assessImage: async (image, mime) => { providerImage = image; providerMime = mime; return assessment; } });
+    const response = await request(app).post('/api/analyze-crop').set(auth)
+      .field('scanId', 'scan-test').field('cropType', 'Cassava')
+      .attach('image', largePng, { filename: 'crop.png', contentType: 'image/png' });
+    assert.equal(response.status, 200);
+    assert.equal(providerMime, 'image/jpeg');
+    assert.ok(providerImage);
+    const prepared = await sharp(providerImage).metadata();
+    assert.equal(prepared.format, 'jpeg');
+    assert.ok((prepared.width ?? 0) <= 2048);
+    assert.ok((prepared.height ?? 0) <= 2048);
   });
 
   it('reports Firestore assessment-save failures separately from Gemini failures', async () => {

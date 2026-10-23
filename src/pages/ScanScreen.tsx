@@ -30,6 +30,7 @@ export const ScanScreen: React.FC = () => {
   const galleryRef = useRef<HTMLInputElement>(null);
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const recognitionRef = useRef<any>(null);
+  const scanSubmissionStartedRef = useRef(false);
 
   /* Start voice recognition from FAB */
   useEffect(() => {
@@ -113,6 +114,7 @@ export const ScanScreen: React.FC = () => {
   };
 
   const handleAnalyze = () => {
+    if (scanSubmissionStartedRef.current) return;
     const cropSelectionError = validateCropSelection(scanDraft.cropType, scanDraft.customCropName);
     if (cropSelectionError) {
       setErrorBanner(cropSelectionError);
@@ -124,6 +126,7 @@ export const ScanScreen: React.FC = () => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
+    scanSubmissionStartedRef.current = true;
     navigate('/scanning');
   };
 

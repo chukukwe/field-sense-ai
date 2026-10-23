@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { AssessmentRequestError, requestCropAssessment } from '../../src/data/assessmentApi.js';
+import { canRequestAssessmentRetry } from '../../src/data/assessmentRetry.js';
+import { advanceEstimatedProgress, getAssessmentProgressMessage } from '../../src/data/assessmentProgress.js';
 import type { CropAssessment } from '../../src/types.js';
 import { translateAssessmentToPidgin } from '../../src/data/pidginTranslationApi.js';
 
@@ -16,6 +18,44 @@ const result: CropAssessment = {
 const input = { image: new Blob(['photo'], { type: 'image/png' }), cropType: 'Cassava' as const, observations: '', scanId: 'scan-test', idToken: 'test-token' };
 
 describe('frontend assessment API helper', () => {
+  it('keeps estimated progress gradual and below completion until analysis succeeds', () => {
+    let preparing = 0;
+    for (let index = 0; index < 100; index += 1) {
+      preparing = advanceEstimatedProgress(preparing, 'preparing', 250);
+    }
+    assert.equal(preparing, 18);
+
+    let uploading = preparing;
+    for (let index = 0; index < 100; index += 1) {
+      uploading = advanceEstimatedProgress(uploading, 'uploading', 250);
+    }
+    assert.equal(uploading, 38);
+
+    let analyzing = uploading;
+    for (let index = 0; index < 250; index += 1) {
+      analyzing = advanceEstimatedProgress(analyzing, 'analyzing', 1_000);
+      assert.ok(analyzing < 100);
+    }
+    assert.equal(analyzing, 94);
+    assert.ok(advanceEstimatedProgress(90, 'analyzing', 1_000) - 90 < 0.1);
+  });
+
+  it('uses preparation, upload, analysis, and long-wait status messages', () => {
+    assert.match(getAssessmentProgressMessage('preparing', 0), /Preparing your crop image/);
+    assert.match(getAssessmentProgressMessage('uploading', 0), /Uploading crop image/);
+    assert.match(getAssessmentProgressMessage('analyzing', 0), /AI is examining your crop/);
+    assert.match(getAssessmentProgressMessage('analyzing', 30_000), /taking a little longer/);
+    assert.equal(getAssessmentProgressMessage('complete', 0), 'Analysis complete');
+  });
+
+  it('allows an authenticated local-only scan with its saved photo to be retried', () => {
+    const localOnlyScan = { photoStorageKey: 'owner/scan-test', dataScope: 'local-only' };
+    assert.equal(canRequestAssessmentRetry(localOnlyScan, true, false), true);
+    assert.equal(canRequestAssessmentRetry(localOnlyScan, false, false), false);
+    assert.equal(canRequestAssessmentRetry(localOnlyScan, true, true), false);
+    assert.equal(canRequestAssessmentRetry({ dataScope: 'local-only' }, true, false), false);
+  });
+
   it('sends multipart data without setting Content-Type and accepts an inconclusive response', async () => {
     let sentUrl = '';
     let sentInit: RequestInit | undefined;
@@ -37,6 +77,26 @@ describe('frontend assessment API helper', () => {
       (error: unknown) => error instanceof AssessmentRequestError
         && error.code === 'GEMINI_TIMEOUT' && error.retryable && error.message === 'The assessment timed out.',
     );
+  });
+
+  it('treats an intermediary 504 response without JSON as a retryable timeout', async () => {
+    await assert.rejects(
+      requestCropAssessment(input, async () => new Response('gateway timeout body', { status: 504 })),
+      (error: unknown) => error instanceof AssessmentRequestError
+        && error.code === 'ASSESSMENT_TIMEOUT'
+        && error.retryable
+        && /took too long/i.test(error.message)
+        && !error.message.includes('gateway timeout body'),
+    );
+  });
+
+  it('keeps no-body quota and service-unavailable errors recoverable', async () => {
+    for (const [status, code] of [[429, 'RATE_LIMITED'], [503, 'ASSESSMENT_UNAVAILABLE']] as const) {
+      await assert.rejects(
+        requestCropAssessment(input, async () => new Response('untrusted upstream body', { status })),
+        (error: unknown) => error instanceof AssessmentRequestError && error.code === code && error.retryable,
+      );
+    }
   });
 
   it('rejects malformed successful responses', async () => {

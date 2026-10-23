@@ -5,20 +5,27 @@ import { TopHeader } from '../components/common/TopHeader';
 import { useApp } from '../context/useApp';
 import { getScanPhoto, saveScanPhoto } from '../data/photoStore';
 import { requestCropAssessment } from '../data/assessmentApi';
+import { useAssessmentProgress } from '../hooks/useAssessmentProgress';
+import { AssessmentProgressIndicator } from '../components/common/AssessmentProgressIndicator';
 import { useAuth } from '../context/useAuth';
 import { uploadCropPhoto } from '../data/photoApi';
-
-type ScanStage = 'Preparing scan' | 'Saving scan' | 'Uploading image' | 'Analyzing crop';
 
 export const ScanningScreen: React.FC = () => {
   const navigate = useNavigate();
   const { scanDraft, createScanFromDraft, saveScan, applyAssessment, markScanFailed } = useApp();
   const { user } = useAuth();
   const scanProcessRef = useRef<Promise<string> | null>(null);
+  const {
+    progress,
+    message: progressMessage,
+    start: startProgress,
+    resume: resumeProgress,
+    setPhase: setProgressPhase,
+    stop: stopProgress,
+    complete: completeProgress,
+  } = useAssessmentProgress();
 
   const [laserPos, setLaserPos] = useState<number>(20);
-  const [stage, setStage] = useState<ScanStage>('Preparing scan');
-  const [dots, setDots] = useState<string>('');
 
   // Animate the laser scanning bar
   useEffect(() => {
@@ -33,18 +40,16 @@ export const ScanningScreen: React.FC = () => {
     return () => clearInterval(laserInterval);
   }, []);
 
-  useEffect(() => {
-    const dotsInterval = setInterval(() => setDots((prev) => prev.length >= 3 ? '' : `${prev}.`), 400);
-    return () => clearInterval(dotsInterval);
-  }, []);
-
   // Keep the original photo on this device, save scan metadata, and allow the
   // authenticated backend to register local-only metadata during assessment.
   useEffect(() => {
     let active = true;
+    // Strict Mode replays this effect after the hook's cleanup clears its
+    // interval. Resume the estimate without starting a second scan request.
+    resumeProgress();
     if (!scanProcessRef.current) {
+      startProgress();
       scanProcessRef.current = (async () => {
-        setStage('Saving scan');
         const scan = createScanFromDraft();
         try {
           let photoSaved = false;
@@ -70,8 +75,10 @@ export const ScanningScreen: React.FC = () => {
           });
 
           if (!photoSaved || !scan.photoStorageKey) {
+            stopProgress();
             await markScanFailed(scan.id, 'The photo could not be saved on this device, so no assessment was requested.');
           } else if (!scanDraft.cropType) {
+            stopProgress();
             await markScanFailed(scan.id, 'Choose a crop type before requesting an assessment.');
           } else {
             let localPhoto: Blob | undefined;
@@ -85,12 +92,13 @@ export const ScanningScreen: React.FC = () => {
               const message = error instanceof Error
                 ? error.message
                 : 'The photo could not be read from this device.';
+              stopProgress();
               await markScanFailed(scan.id, message);
             }
 
             if (localPhoto && user && idToken) {
               try {
-                setStage('Analyzing crop');
+                setProgressPhase('uploading');
                 const assessment = await requestCropAssessment({
                   image: localPhoto,
                   cropType: scanDraft.cropType,
@@ -100,20 +108,24 @@ export const ScanningScreen: React.FC = () => {
                   idToken,
                 });
                 applyAssessment(scan.id, assessment, assessment.status, assessment.summary);
+                await completeProgress();
               } catch (error) {
+                stopProgress();
                 await markScanFailed(scan.id, error instanceof Error ? error.message : 'The assessment could not be completed. You can retry this scan.');
               }
 
               // The assessment request creates the authenticated user's scan
               // record when the initial client-side Firestore save was offline.
               // Sync the same local photo only after that record exists.
-              setStage('Uploading image');
               try { await uploadCropPhoto({ scanId: scan.id, image: localPhoto, idToken }); }
               catch { /* The local image remains available; Scan Details retries sync when reopened. */ }
             }
           }
         } catch {
+          stopProgress();
           await markScanFailed(scan.id, 'The scan could not be completed. You can retry this scan from your scan history.');
+        } finally {
+          stopProgress();
         }
 
         return scan.id;
@@ -126,7 +138,7 @@ export const ScanningScreen: React.FC = () => {
       if (active) navigate(`/assessment/${scanId}`);
     });
     return () => { active = false; };
-  }, [navigate, scanDraft.photoFile, scanDraft.cropType, scanDraft.customCropName, scanDraft.observations, createScanFromDraft, saveScan, applyAssessment, markScanFailed, user]);
+  }, [navigate, scanDraft.photoFile, scanDraft.cropType, scanDraft.customCropName, scanDraft.observations, createScanFromDraft, saveScan, applyAssessment, markScanFailed, user, startProgress, resumeProgress, setProgressPhase, completeProgress, stopProgress]);
 
   const previewImage = scanDraft.photoPreviewUrl || '/assets/cassava-leaf-sample.png';
   const cropLabel = scanDraft.cropType || 'Cassava';
@@ -153,7 +165,7 @@ export const ScanningScreen: React.FC = () => {
             <div className="absolute top-3 left-3 right-3 flex items-center justify-between z-10 pointer-events-none gap-2">
               <span className="bg-black/70 backdrop-blur-md text-white text-[11px] px-2.5 py-1 rounded-full font-medium flex items-center gap-1.5 border border-white/10 shrink-0">
                 <span className="w-2 h-2 rounded-full bg-[#22C55E] animate-pulse shrink-0" />
-                {stage}
+                Crop analysis
               </span>
             </div>
 
@@ -167,13 +179,9 @@ export const ScanningScreen: React.FC = () => {
               <div className="h-[8px] w-full bg-gradient-to-b from-[#FF8A32]/30 to-transparent -mt-[1px]" />
             </div>
 
-            {/* Frosted Bottom Overlay — Scanning Status */}
-            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/50 to-transparent rounded-b-xl p-3 z-10">
-              <p className="text-[12px] font-semibold text-white tracking-tight">
-                {stage}{dots}
-              </p>
-            </div>
           </div>
+
+          <AssessmentProgressIndicator progress={progress} message={progressMessage} />
 
           {/* Replace / Remove (disabled while scanning) */}
           <div className="flex flex-col gap-2 pointer-events-none opacity-40">

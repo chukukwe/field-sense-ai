@@ -56,11 +56,67 @@ describe('Supabase private Storage adapter', () => {
     await store.remove('users/uid/scans/scan-1/photo');
   });
 
-  it('classifies storage authentication, not-found, and transport failures without reading error bodies', async () => {
+  it('classifies known 404 causes without exposing upstream error bodies', async () => {
+    const cases = [
+      [Response.json({ statusCode: '404', error: 'Not Found', message: 'Bucket not found' }, { status: 404 }), 'bucket_missing'],
+      [Response.json({ statusCode: '404', error: 'Not Found', message: 'Object not found' }, { status: 404 }), 'object_missing'],
+      [new Response('<html>Cannot POST /storage/v1/object/crop-photos/private/path</html>', { status: 404, headers: { 'Content-Type': 'text/html' } }), 'endpoint_not_found'],
+      [new Response('missing', { status: 404, headers: { 'Content-Type': 'text/plain' } }), 'not_found'],
+    ] as const;
+    for (const [response, category] of cases) {
+      const store = createSupabasePhotoStore({
+        url: 'https://project.supabase.co', apiKey: 'test-only-secret', bucket: 'private-bucket',
+        fetcher: async () => response,
+      });
+      await assert.rejects(store.upload('users/uid/scans/scan-1/photo', Buffer.from('image'), 'image/png'), (error: unknown) => {
+        assert.ok(error instanceof PhotoStorageError);
+        assert.equal(error.category, category);
+        assert.equal(JSON.stringify(error).includes('private/path'), false);
+        assert.equal(JSON.stringify(error).includes('test-only-secret'), false);
+        return true;
+      });
+    }
+  });
+
+  it('keeps a missing object idempotent for reads and deletes, but does not hide a missing bucket', async () => {
+    const objectMissing = () => new Response(JSON.stringify({ statusCode: '404', error: 'Not Found', message: 'Object not found' }), {
+      status: 404, headers: { 'Content-Type': 'application/json' },
+    });
+    const objectStore = createSupabasePhotoStore({
+      url: 'https://project.supabase.co', apiKey: 'test-only-secret', bucket: 'private-bucket',
+      fetcher: async () => objectMissing(),
+    });
+    assert.equal(await objectStore.download('users/uid/scans/scan-1/photo'), null);
+    await objectStore.remove('users/uid/scans/scan-1/photo');
+
+    const bucketStore = createSupabasePhotoStore({
+      url: 'https://project.supabase.co', apiKey: 'test-only-secret', bucket: 'private-bucket',
+      fetcher: async () => Response.json({ statusCode: '404', error: 'Not Found', message: 'Bucket not found' }, { status: 404 }),
+    });
+    await assert.rejects(bucketStore.download('users/uid/scans/scan-1/photo'), (error: unknown) => {
+      assert.ok(error instanceof PhotoStorageError);
+      assert.equal(error.category, 'bucket_missing');
+      return true;
+    });
+  });
+
+  it('rejects a non-root Storage URL before making a request', async () => {
+    let requested = false;
+    assert.throws(() => createSupabasePhotoStore({
+      url: 'https://project.supabase.co/rest/v1', apiKey: 'test-only-secret', bucket: 'private-bucket',
+      fetcher: async () => { requested = true; return new Response('{}', { status: 200 }); },
+    }), (error: unknown) => {
+      assert.ok(error instanceof PhotoStorageError);
+      assert.equal(error.category, 'invalid_endpoint');
+      return true;
+    });
+    assert.equal(requested, false);
+  });
+
+  it('classifies storage authentication and transport failures without reading error bodies', async () => {
     const cases = [
       [401, 'invalid_credentials'],
       [403, 'authorization'],
-      [404, 'not_found'],
       [502, 'upstream'],
     ] as const;
     for (const [status, category] of cases) {

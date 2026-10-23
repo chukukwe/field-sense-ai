@@ -56,6 +56,43 @@ export class ProviderError extends Error {
   }
 }
 
+const MAX_ASSESSMENT_IMAGE_EDGE = 2048;
+
+async function prepareAssessmentImage(image: Buffer, mimeType: string) {
+  const startedAt = performance.now();
+  const metadata = await sharp(image, { limitInputPixels: 20_000_000 }).metadata();
+  if (!metadata.width || !metadata.height) throw new Error('Image dimensions are unavailable.');
+  if (metadata.width <= MAX_ASSESSMENT_IMAGE_EDGE && metadata.height <= MAX_ASSESSMENT_IMAGE_EDGE) {
+    await sharp(image, { limitInputPixels: 20_000_000 }).stats();
+    return {
+      buffer: image,
+      mimeType,
+      width: metadata.width,
+      height: metadata.height,
+      processingMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    };
+  }
+  const result = await sharp(image, { limitInputPixels: 20_000_000 })
+    .rotate()
+    .resize({
+      width: MAX_ASSESSMENT_IMAGE_EDGE,
+      height: MAX_ASSESSMENT_IMAGE_EDGE,
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
+    .flatten({ background: '#ffffff' })
+    .jpeg({ quality: 88 })
+    .toBuffer({ resolveWithObject: true });
+  if (!result.info.width || !result.info.height) throw new Error('Image dimensions are unavailable.');
+  return {
+    buffer: result.data,
+    mimeType: 'image/jpeg',
+    width: result.info.width,
+    height: result.info.height,
+    processingMs: Math.max(0, Math.round(performance.now() - startedAt)),
+  };
+}
+
 function sendError(res: express.Response, status: number, code: string, message: string, retryable = false) {
   return res.status(status).json({ error: { code, message, retryable } });
 }
@@ -79,14 +116,20 @@ function sendPhotoStorageError(res: express.Response, error: unknown, operation:
   const errors = {
     invalid_credentials: ['PHOTO_STORAGE_INVALID_CREDENTIALS', 'Private photo storage rejected its server credentials. Contact the app administrator.', false],
     authorization: ['PHOTO_STORAGE_FORBIDDEN', 'Private photo storage denied this action. Contact the app administrator.', false],
-    not_found: ['PHOTO_STORAGE_NOT_FOUND', 'The configured photo storage endpoint, bucket, or object was not found. Contact the app administrator.', false],
+    invalid_endpoint: ['PHOTO_STORAGE_ENDPOINT_INVALID', 'Private photo storage has an invalid server endpoint configuration. Contact the app administrator.', false],
+    endpoint_not_found: ['PHOTO_STORAGE_ENDPOINT_NOT_FOUND', 'The configured private photo storage API endpoint was not found. Contact the app administrator.', false],
+    bucket_missing: ['PHOTO_STORAGE_BUCKET_NOT_FOUND', 'The configured private photo bucket was not found. Contact the app administrator.', false],
+    object_missing: ['PHOTO_STORAGE_OBJECT_NOT_FOUND', 'The requested private photo object was not found.', false],
+    not_found: ['PHOTO_STORAGE_NOT_FOUND', 'Private photo storage returned an unclassified not-found response. Contact the app administrator.', false],
     timeout: ['PHOTO_STORAGE_TIMEOUT', 'Photo storage took too long to respond. Your local copy is still available; retry later.', true],
     network: ['PHOTO_STORAGE_NETWORK_ERROR', 'Photo storage could not be reached. Your local copy is still available; retry later.', true],
     upstream: ['PHOTO_STORAGE_UNAVAILABLE', 'Private photo storage is temporarily unavailable. Your local copy is still available.', true],
     request_rejected: ['PHOTO_STORAGE_REQUEST_REJECTED', 'Private photo storage rejected this request. Your local copy is still available.', false],
   } as const;
   const [code, message, retryable] = errors[category];
-  return sendError(res, category === 'upstream' || category === 'request_rejected' ? 502 : 503, code, message, retryable);
+  const status = category === 'object_missing' ? 404
+    : category === 'upstream' || category === 'request_rejected' ? 502 : 503;
+  return sendError(res, status, code, message, retryable);
 }
 
 export function createApp(deps: AnalyzeDependencies) {
@@ -275,10 +318,9 @@ export function createApp(deps: AnalyzeDependencies) {
           if (!verifiedFile || !allowedMimeTypes.has(verifiedFile.mime) || verifiedFile.mime !== file.mimetype) {
             return sendError(res, 415, 'UNSUPPORTED_IMAGE', 'Use a valid JPEG, PNG, or WebP image.');
           }
+          let assessmentImage: Awaited<ReturnType<typeof prepareAssessmentImage>>;
           try {
-            const metadata = await sharp(file.buffer, { limitInputPixels: 20_000_000 }).metadata();
-            if (!metadata.width || !metadata.height) throw new Error('Missing image dimensions.');
-            await sharp(file.buffer, { limitInputPixels: 20_000_000 }).stats();
+            assessmentImage = await prepareAssessmentImage(file.buffer, verifiedFile.mime);
           } catch {
             return sendError(res, 415, 'MALFORMED_IMAGE', 'The image file is damaged or cannot be decoded. Choose another photo.');
           }
@@ -299,8 +341,9 @@ export function createApp(deps: AnalyzeDependencies) {
             if (claim === 'missing') return sendError(res, 404, 'SCAN_NOT_FOUND', 'This scan does not match a scan in your account.');
             if (claim === 'complete') return sendError(res, 409, 'ALREADY_ASSESSED', 'This scan already has an assessment.');
             if (claim === 'processing') return sendError(res, 409, 'ALREADY_PROCESSING', 'This scan is already being assessed.');
+            const providerStartedAt = performance.now();
             try {
-              const raw = await deps.assessImage(file.buffer, verifiedFile.mime, customCropResult.data ?? cropType, observationsResult.data);
+              const raw = await deps.assessImage(assessmentImage.buffer, assessmentImage.mimeType, customCropResult.data ?? cropType, observationsResult.data);
               const parsed = assessmentSchema.safeParse(raw);
               if (!parsed.success) throw new ProviderError('INVALID_MODEL_RESPONSE', 502, 'The assessment could not be validated. You can retry this scan.');
               try {
@@ -316,7 +359,7 @@ export function createApp(deps: AnalyzeDependencies) {
               const failure = error instanceof ProviderError
                 ? error
                 : new ProviderError('ASSESSMENT_FAILED', 502, 'The crop assessment service could not complete this request. Try again later.');
-              console.warn(`Crop assessment failed; category=${failure.code}; httpStatus=${failure.status}.`);
+              console.warn(`Crop assessment failed; category=${failure.code}; httpStatus=${failure.status}; providerElapsedMs=${Math.max(0, Math.round(performance.now() - providerStartedAt))}; imagePrepareMs=${assessmentImage.processingMs}; sourceImageBytes=${file.buffer.length}; providerImageBytes=${assessmentImage.buffer.length}; providerImageWidth=${assessmentImage.width}; providerImageHeight=${assessmentImage.height}.`);
               await deps.failScan(uid, scanId, failure.publicMessage)
                 .catch((updateError: unknown) => logFirestoreFailure('mark_assessment_failure', updateError));
               return sendError(res, failure.status, failure.code, failure.publicMessage, failure.retryable);

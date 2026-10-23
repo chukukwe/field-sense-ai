@@ -85,7 +85,7 @@ export function classifyGeminiFailure(error: unknown): GeminiFailureDiagnostics 
     if (TIMEOUT_CODES.has(code)) return { category: 'timeout', code };
     if (CONNECTION_CODES.has(code)) return { category: 'connection', code };
   }
-  if (names.includes('AbortError') || codes.includes('AbortError') || messages.some((message) => /timeout|timed out/i.test(message))) {
+  if (names.includes('AbortError') || names.includes('TimeoutError') || codes.includes('AbortError') || messages.some((message) => /timeout|timed out/i.test(message))) {
     return { category: 'timeout', code: 'REQUEST_TIMEOUT' };
   }
   if (names.includes('TypeError') || messages.some((message) => /^fetch failed/i.test(message))) {
@@ -105,7 +105,10 @@ export function mapGeminiProviderFailure(error: unknown): ProviderError {
   const status = failure.httpStatus ?? 0;
   if (status === 429) return new ProviderError('GEMINI_QUOTA', 429, 'The assessment service is busy or at its request limit. Please try again later.');
   if (status === 408 || status === 504 || failure.category === 'timeout') {
-    return new ProviderError('GEMINI_TIMEOUT', 504, 'The assessment took too long. You can retry when your connection is stable.');
+    return new ProviderError('GEMINI_TIMEOUT', 504, 'The assessment service took too long to respond. Your scan is saved; you can retry this assessment.');
+  }
+  if (status === 503) {
+    return new ProviderError('GEMINI_UNAVAILABLE', 503, 'The assessment service is temporarily unavailable. Your scan is saved; you can retry later.');
   }
   if (status === 401 || status === 403) {
     return new ProviderError('GEMINI_AUTH_FAILED', 503, 'The assessment service could not authenticate. Contact the app administrator.', false);
@@ -117,6 +120,17 @@ export function mapGeminiProviderFailure(error: unknown): ProviderError {
     return new ProviderError('GEMINI_REQUEST_REJECTED', 502, 'The assessment service rejected its request. Contact the app administrator.', false);
   }
   return new ProviderError('GEMINI_UNAVAILABLE', 502);
+}
+
+export function parseGeminiResponseText(text: string | undefined | null): unknown {
+  if (typeof text !== 'string' || !text.trim()) {
+    throw new ProviderError('EMPTY_MODEL_RESPONSE', 502, 'The assessment service returned no result. You can retry this scan.');
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new ProviderError('INVALID_MODEL_RESPONSE', 502, 'The assessment could not be validated. You can retry this scan.');
+  }
 }
 
 const pidginTranslationSchema = {
@@ -216,11 +230,5 @@ export async function assessWithGemini(
     throw mapGeminiProviderFailure(error);
   }
 
-  const text = response.text;
-  if (!text) throw new ProviderError('EMPTY_MODEL_RESPONSE', 502);
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw new ProviderError('INVALID_MODEL_RESPONSE', 502, 'The assessment could not be validated. You can retry this scan.');
-  }
+  return parseGeminiResponseText(response.text);
 }

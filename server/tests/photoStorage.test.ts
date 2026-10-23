@@ -54,6 +54,15 @@ describe('protected crop photo storage API', () => {
     assert.equal(JSON.stringify(response.body).includes('secret'), false);
   });
 
+  it('returns a distinct sanitized error when Supabase identifies a missing bucket', async () => {
+    const { app } = setup({ upload: async () => { throw new PhotoStorageError('bucket_missing', 404); } });
+    const response = await request(app).post('/api/scans/scan-test/photo').set('Authorization', 'Bearer owner-token')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+    assert.equal(response.status, 503);
+    assert.equal(response.body.error.code, 'PHOTO_STORAGE_BUCKET_NOT_FOUND');
+    assert.equal(JSON.stringify(response.body).includes('test-only'), false);
+  });
+
   it('uploads an owner-scoped image and retrieves it after a fresh token (same account on another device)', async () => {
     const { app, uploadedPaths } = setup();
     const upload = await request(app).post('/api/scans/scan-test/photo').set('Authorization', 'Bearer owner-token')

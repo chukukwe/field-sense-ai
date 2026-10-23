@@ -9,8 +9,48 @@ export interface SupabasePhotoStoreConfig {
   fetcher?: typeof fetch;
 }
 
+type NotFoundCategory = 'bucket_missing' | 'object_missing' | 'endpoint_not_found' | 'not_found';
+
+function projectRoot(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname
+      || parsed.username || parsed.password || (parsed.pathname !== '' && parsed.pathname !== '/')
+      || parsed.search || parsed.hash) {
+      throw new Error('invalid endpoint');
+    }
+    return parsed.origin;
+  } catch {
+    throw new PhotoStorageError('invalid_endpoint');
+  }
+}
+
+async function classifyNotFound(response: Response): Promise<NotFoundCategory> {
+  const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+  let payload: unknown;
+  try { payload = await response.clone().json(); } catch { payload = undefined; }
+
+  if (typeof payload === 'object' && payload !== null) {
+    const fields = payload as Record<string, unknown>;
+    const signals = [fields.code, fields.error, fields.message, fields.statusCode]
+      .filter((value): value is string => typeof value === 'string')
+      .join(' ')
+      .toLowerCase();
+    if (/bucket[ _-]?not[ _-]?found|bucketnotfound/.test(signals)) return 'bucket_missing';
+    if (/object[ _-]?not[ _-]?found|objectnotfound/.test(signals)) return 'object_missing';
+    if (/cannot\s+(get|post|put|delete|head)\s+\/|(?:route|endpoint|requested path).*not found|pgrst\d+/.test(signals)) {
+      return 'endpoint_not_found';
+    }
+  }
+
+  // Storage errors are JSON. An HTML 404 indicates the request likely reached
+  // a web/router endpoint instead of the Storage API; the body is never logged.
+  if (contentType.includes('text/html')) return 'endpoint_not_found';
+  return 'not_found';
+}
+
 export function createSupabasePhotoStore(config: SupabasePhotoStoreConfig) {
-  const root = config.url.replace(/\/$/, '');
+  const root = projectRoot(config.url);
   const fetcher = config.fetcher ?? fetch;
   const objectUrl = (path: string) => `${root}/storage/v1/object/${encodeURIComponent(config.bucket)}/${path.split('/').map(encodeURIComponent).join('/')}`;
   const headers = (extra?: HeadersInit) => {
@@ -29,12 +69,14 @@ export function createSupabasePhotoStore(config: SupabasePhotoStoreConfig) {
       throw new PhotoStorageError(error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : 'network');
     }
     if (response.ok) return response;
-    if (operation === 'download' && response.status === 404) return response;
-    if (operation === 'delete' && response.status === 404) return response;
+    if (response.status === 404) {
+      const category = await classifyNotFound(response);
+      if (category === 'object_missing' && (operation === 'download' || operation === 'delete')) return response;
+      throw new PhotoStorageError(category, response.status);
+    }
     const category = response.status === 401 ? 'invalid_credentials'
       : response.status === 403 ? 'authorization'
-        : response.status === 404 ? 'not_found'
-          : response.status >= 500 ? 'upstream' : 'request_rejected';
+        : response.status >= 500 ? 'upstream' : 'request_rejected';
     throw new PhotoStorageError(category, response.status);
   };
 

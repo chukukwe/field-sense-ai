@@ -17,8 +17,11 @@ import { useApp } from '../context/useApp';
 import { useAuth } from '../context/useAuth';
 import { getScanPhoto } from '../data/photoStore';
 import { AssessmentRequestError, requestCropAssessment } from '../data/assessmentApi';
+import { canRequestAssessmentRetry } from '../data/assessmentRetry';
 import { simpleConfidence, simpleLikelihood } from '../data/assessmentLanguage';
 import { usePidginAssessment } from '../data/usePidginAssessment';
+import { useAssessmentProgress } from '../hooks/useAssessmentProgress';
+import { AssessmentProgressIndicator } from '../components/common/AssessmentProgressIndicator';
 import { PidginAssessmentControls } from '../components/common/PidginAssessmentControls';
 
 type AssessmentVariant = 'single' | 'multiple' | 'unidentified' | 'unclear' | 'offline';
@@ -75,6 +78,8 @@ export const CropAssessmentScreen: React.FC = () => {
   const [showSaveModal, setShowSaveModal] = useState<boolean>(false);
   const [isRetrying, setIsRetrying] = useState(false);
   const [retryError, setRetryError] = useState('');
+  const retryInFlightRef = useRef(false);
+  const assessmentProgress = useAssessmentProgress();
 
   // Allow switching between Figma states for verification
   const showStateSwitcher = import.meta.env.DEV && searchParams.get('debugStates') === 'true';
@@ -117,23 +122,29 @@ export const CropAssessmentScreen: React.FC = () => {
   const cropLabel = scan?.customCropName || scan?.cropType || 'Cassava';
 
   const retryAssessment = async () => {
-    if (!scan?.photoStorageKey || !user || isRetrying || scan.dataScope !== 'cloud') return;
+    if (retryInFlightRef.current || !user || !canRequestAssessmentRetry(scan, true, isRetrying)) return;
+    retryInFlightRef.current = true;
+    assessmentProgress.start();
     setIsRetrying(true);
     setRetryError('');
     applyAssessment(scan.id, undefined, 'processing', 'Your crop photo is being assessed.');
     try {
       const image = await getScanPhoto(scan.photoStorageKey);
       if (!image) throw new Error('The saved photo is not available on this device.');
+      const idToken = await user.getIdToken();
+      assessmentProgress.setPhase('uploading');
       const assessment = await requestCropAssessment({
         image,
         cropType: scan.cropType,
         customCropName: scan.customCropName,
         observations: scan.userObservations ?? '',
         scanId: scan.id,
-        idToken: await user.getIdToken(),
+        idToken,
       });
       applyAssessment(scan.id, assessment, assessment.status, assessment.summary);
+      await assessmentProgress.complete();
     } catch (error) {
+      assessmentProgress.stop();
       const message = error instanceof Error ? error.message : 'The assessment could not be completed. You can retry this scan.';
       setRetryError(message);
       if (error instanceof AssessmentRequestError && error.code === 'ALREADY_PROCESSING') {
@@ -143,6 +154,8 @@ export const CropAssessmentScreen: React.FC = () => {
       }
       await markScanFailed(scan.id, message);
     } finally {
+      assessmentProgress.stop();
+      retryInFlightRef.current = false;
       setIsRetrying(false);
     }
   };
@@ -238,11 +251,12 @@ export const CropAssessmentScreen: React.FC = () => {
               </div>
               <p className="text-[10px] leading-relaxed text-[#A1A7A3]">{assessment.disclaimer}</p>
             </>}
-            {canStartOrRetry && scan.dataScope === 'cloud' && scan.photoStorageKey && <button
+            {canStartOrRetry && canRequestAssessmentRetry(scan, Boolean(user), false) && <button
               onClick={() => void retryAssessment()}
               disabled={isRetrying}
               className="w-full bg-[#176B45] hover:bg-[#1eb968] disabled:opacity-60 text-white py-3 rounded-xl text-xs font-semibold cursor-pointer transition"
             >{isRetrying ? 'Requesting assessment…' : technicalFailure ? 'Retry assessment' : scan.assessmentStatus === 'processing' ? 'Check assessment' : 'Start assessment'}</button>}
+            {isRetrying && <AssessmentProgressIndicator progress={assessmentProgress.progress} message={assessmentProgress.message} />}
             {retryError && <p role="alert" className="text-xs text-[#FFB4A8]">{retryError}</p>}
           </div>
           <div className="grid grid-cols-2 gap-2.5">
@@ -274,6 +288,8 @@ export const CropAssessmentScreen: React.FC = () => {
       />
 
       <div className="px-4 flex flex-col gap-4">
+        {isRetrying && <AssessmentProgressIndicator progress={assessmentProgress.progress} message={assessmentProgress.message} />}
+
         {isSampleScan && (
           <p className="rounded-xl border border-[#B36A2D] bg-[#2E2319] px-3 py-2 text-[11px] leading-relaxed text-[#F2D1AE]">
             Sample assessment for demonstration only. This is not an AI result for your crop.

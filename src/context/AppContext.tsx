@@ -132,26 +132,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const saveScan = useCallback(async (scan: ScanItem): Promise<'cloud' | 'local-only'> => {
     const savedScan: ScanItem = { ...scan, assessmentStatus: scan.assessmentStatus ?? 'unavailable' };
+    const localScan: ScanItem = {
+      ...savedScan,
+      imageUrl: savedScan.imageUrl.startsWith('blob:') ? '' : savedScan.imageUrl,
+      cloudPhotoPath: undefined,
+      dataScope: 'local-only',
+      footerStatus: 'Saved on this device only',
+    };
+
+    // Persist locally before any network request. The assessment API creates
+    // the owner-scoped cloud record when it claims this scan. Awaiting a
+    // Firestore setDoc here can block the scan indefinitely while offline,
+    // and a delayed client write could overwrite a completed server result.
     try {
-      if (!firestore || !uid) throw new Error('Firebase is unavailable.');
-      const cloudScan = JSON.parse(JSON.stringify(savedScan)) as Record<string, unknown>;
-      delete cloudScan.id;
-      cloudScan.imageUrl = '';
-      await setDoc(doc(firestore, 'users', uid, 'scans', scan.id), { ...cloudScan, dataScope: 'cloud', updatedAt: serverTimestamp() });
-      setScans((prev) => [{ ...savedScan, dataScope: 'cloud' }, ...prev.filter((item) => item.id !== scan.id)]);
-      return 'cloud';
-    } catch {
-      const localScan = {
-        ...savedScan,
-        imageUrl: savedScan.imageUrl.startsWith('blob:') ? '' : savedScan.imageUrl,
-        cloudPhotoPath: undefined,
-        dataScope: 'local-only' as const,
-        footerStatus: 'Saved on this device only',
-      };
-      setScans((prev) => [localScan, ...prev.filter((item) => item.id !== scan.id)]);
-      return 'local-only';
-    }
-  }, [uid]);
+      const cached = JSON.parse(localStorage.getItem(scansStorageKey) ?? '[]') as ScanItem[];
+      localStorage.setItem(scansStorageKey, JSON.stringify([localScan, ...cached.filter((item) => item.id !== scan.id)]));
+    } catch { /* in-memory state still keeps the scan available */ }
+    setScans((prev) => [localScan, ...prev.filter((item) => item.id !== scan.id)]);
+    return 'local-only';
+  }, [scansStorageKey]);
 
   const applyAssessment = useCallback((scanId: string, assessment: CropAssessment | undefined, status: NonNullable<ScanItem['assessmentStatus']>, summary?: string) => {
     setScans((previous) => previous.map((scan) => scan.id !== scanId ? scan : {
@@ -170,22 +169,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const markScanFailed = useCallback(async (scanId: string, summary: string) => {
-    if (firestore && uid) {
-      try {
-        await updateDoc(doc(firestore, 'users', uid, 'scans', scanId), {
-          assessmentStatus: 'failed',
-          summary,
-          footerStatus: 'Analysis failed',
-          footerIcon: 'alert',
-          footerActionLabel: 'Retry assessment',
-          updatedAt: serverTimestamp(),
-        });
-      } catch {
-        // The server may already own a processing/result state, or the device may be offline.
-      }
-    }
+    // Keep UI recovery local and immediate. The backend owns cloud assessment
+    // state; a queued client update could hang offline or overwrite a result
+    // that completed after the browser stopped waiting.
     applyAssessment(scanId, undefined, 'failed', summary);
-  }, [uid, applyAssessment]);
+  }, [applyAssessment]);
 
   const deleteScan = useCallback(async (id: string): Promise<boolean> => {
     const scan = scans.find((item) => item.id === id);

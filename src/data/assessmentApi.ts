@@ -41,14 +41,31 @@ export async function requestCropAssessment(input: {
 
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    const error = typeof body === 'object' && body !== null && 'error' in body ? body.error : null;
-    const message = typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+    const rawError = typeof body === 'object' && body !== null && 'error' in body ? body.error : null;
+    const error = typeof rawError === 'object' && rawError !== null
+      ? rawError as { message?: unknown; code?: unknown; retryable?: unknown }
+      : null;
+    const message = typeof error?.message === 'string'
       ? error.message
-      : 'The assessment service could not complete this request.';
-    const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+      : response.status === 408 || response.status === 504
+        ? 'The assessment service took too long to respond. Your scan is saved; you can retry this assessment.'
+        : response.status === 429
+          ? 'The assessment service is at its request limit. Wait a little, then retry this scan.'
+          : response.status === 503
+            ? 'The assessment service is temporarily unavailable. Your scan is saved; you can retry later.'
+            : 'The assessment service could not complete this request.';
+    const code = typeof error?.code === 'string'
       ? error.code
-      : 'ASSESSMENT_FAILED';
-    const retryable = typeof error === 'object' && error !== null && 'retryable' in error && error.retryable === true;
+      : response.status === 408 || response.status === 504
+        ? 'ASSESSMENT_TIMEOUT'
+        : response.status === 429
+          ? 'RATE_LIMITED'
+          : response.status === 503
+            ? 'ASSESSMENT_UNAVAILABLE'
+            : 'ASSESSMENT_FAILED';
+    const retryable = error && 'retryable' in error
+      ? error.retryable === true
+      : response.status === 408 || response.status === 429 || response.status === 503 || response.status === 504;
     throw new AssessmentRequestError(message, code, retryable);
   }
 
