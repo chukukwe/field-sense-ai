@@ -410,7 +410,7 @@ test('Farm Guide selects an area, prepares its plan, and opens crop planting not
     await act(async () => { seePlan.dispatchEvent(new browserWindow.MouseEvent('click', { bubbles: true })); });
     assert.match(mount.host.textContent, /Putting your farm plan together/);
     assert.doesNotMatch(mount.host.textContent, /Plant this month/);
-    await act(async () => delay(2_100));
+    await act(async () => delay(6_000));
     assert.match(mount.host.textContent, /Eket, Akwa Ibom/);
     assert.match(mount.host.textContent, /Mangrove \/ Freshwater Swamp/);
     assert.match(mount.host.textContent, /Crop calendar/);

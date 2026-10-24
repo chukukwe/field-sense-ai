@@ -15,6 +15,7 @@ import {
 import { TopHeader } from '../components/common/TopHeader';
 import { ScanImage } from '../components/common/ScanImage';
 import { useApp } from '../context/useApp';
+import { sortScansNewestFirst } from '../data/scanOrdering';
 import type { ScanItem } from '../types';
 
 /* Badge colours exactly matching the 3 variants in the Figma designs */
@@ -35,7 +36,7 @@ export const HomeScreen: React.FC = () => {
   const navigate = useNavigate();
   const { scans, resetScanDraft } = useApp();
 
-  const recentScans = scans.slice(0, 3);
+  const recentScans = sortScansNewestFirst(scans).slice(0, 3);
   const hasSampleScans = scans.some((scan) => /^scan-[1-4]$/.test(scan.id));
 
   return (

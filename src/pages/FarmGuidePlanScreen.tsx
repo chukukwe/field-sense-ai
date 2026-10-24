@@ -44,16 +44,22 @@ export const FarmGuidePlanScreen: React.FC = () => {
   const zone = isLocationValid && lga ? getFarmGuideZone(lga.zoneId) : undefined;
   const [isPreparing, setIsPreparing] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState('Matching your area to its farming zone…');
+  const [loadingWaitMs] = useState(() => 3600 + Math.floor(Math.random() * 1800));
+  const [progressCycleMs] = useState(() => 1500 + Math.floor(Math.random() * 800));
   const [openCardKey, setOpenCardKey] = useState<string | null>(null);
 
   useEffect(() => {
-    const messageTimer = window.setTimeout(() => setLoadingMessage('Organizing the seasonal crop calendar…'), 600);
-    const finishTimer = window.setTimeout(() => setIsPreparing(false), 2000);
+    const messageTimers = [
+      window.setTimeout(() => setLoadingMessage('Finding your area’s farming zone…'), 850),
+      window.setTimeout(() => setLoadingMessage('Checking the season window for your area…'), 2050),
+      window.setTimeout(() => setLoadingMessage('Organizing crop planting details…'), 2800),
+    ];
+    const finishTimer = window.setTimeout(() => setIsPreparing(false), loadingWaitMs);
     return () => {
-      window.clearTimeout(messageTimer);
+      messageTimers.forEach((timer) => window.clearTimeout(timer));
       window.clearTimeout(finishTimer);
     };
-  }, []);
+  }, [loadingWaitMs]);
 
   useEffect(() => {
     if (isLocationValid && state && lga) saveFarmGuideLocation(state.id, lga.id);
@@ -81,7 +87,7 @@ export const FarmGuidePlanScreen: React.FC = () => {
             <h2 className="mt-4 text-base font-bold text-white">Putting your farm plan together</h2>
             <p className="mt-2 text-xs text-white/80" role="status">{loadingMessage}</p>
             <div className="mt-5 h-1.5 w-full max-w-56 overflow-hidden rounded-full bg-white/15" aria-hidden="true">
-              <div className="farm-guide-progress h-full w-2/5 rounded-full bg-[#5EE49A]" />
+              <div className="farm-guide-progress h-full w-2/5 rounded-full bg-[#5EE49A]" style={{ animationDuration: `${progressCycleMs}ms` }} />
             </div>
             <p className="mt-4 text-[10px] text-white/60">Using your selected area and current season</p>
           </div>

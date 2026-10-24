@@ -44,12 +44,12 @@ body {
 }
 
 .farm-guide-progress {
-  animation: farm-guide-progress 1.4s ease-in-out infinite;
+  animation: farm-guide-progress 1.8s cubic-bezier(0.42, 0, 0.45, 1) infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .farm-guide-progress {
-    animation-duration: 2.8s;
+    animation-duration: 2.8s !important;
   }
 }
 
