@@ -101,7 +101,7 @@ describe('Gemini failure diagnostics', () => {
     assert.equal(fetchCalls, 1, 'SDK attempt limit must prevent retrying the provider request');
     assert.equal(requestPath, '/v1beta/models/gemini-3.8-flash:generateContent');
     assert.equal(requestMethod, 'POST');
-    assert.equal(requestTimeoutHeader, '120');
+    assert.equal(requestTimeoutHeader, '180');
     assert.ok(requestPayload);
     const generationConfig = requestPayload.generationConfig as Record<string, unknown>;
     const thinkingConfig = generationConfig.thinkingConfig as Record<string, unknown>;

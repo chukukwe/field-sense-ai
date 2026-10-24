@@ -298,14 +298,14 @@ export async function assessWithGemini(
     phase: 'generate_content',
     imageMimeType: mimeType,
     imageBytes: image.byteLength,
-    timeoutMs: 120_000,
+    timeoutMs: 180_000,
     attemptLimit: 1,
     thinkingLevel: 'low',
   }));
   let response;
   try {
     const ai = new GoogleGenAI({ apiKey, httpOptions: {
-      timeout: 120_000,
+      timeout: 180_000,
       retryOptions: { attempts: 1 },
       fetch: createDiagnosticFetch(fetchImpl, requestId, model),
     } });
