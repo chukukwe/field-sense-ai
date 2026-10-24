@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import { ProviderError } from './app.js';
 import type { CropAssessmentResult } from './assessmentSchema.js';
 
@@ -53,6 +53,11 @@ export type GeminiFailureDiagnostics = {
   httpStatus?: number;
 };
 
+type SafeProviderDetails = {
+  providerCode?: number | string;
+  providerStatus?: string;
+};
+
 const DNS_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'EAI_FAIL', 'EAI_NONAME']);
 const CONNECTION_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'UND_ERR_CONNECT_TIMEOUT']);
 const TLS_CODES = new Set([
@@ -94,17 +99,85 @@ export function classifyGeminiFailure(error: unknown): GeminiFailureDiagnostics 
   return { category: 'provider', code: 'UNKNOWN_PROVIDER_ERROR' };
 }
 
-function logGeminiFailure(error: unknown, startedAt: number, requestId: string): GeminiFailureDiagnostics {
+function logGeminiFailure(error: unknown, startedAt: number, requestId: string, model: string, phase: string): GeminiFailureDiagnostics {
   const details = classifyGeminiFailure(error);
+  const providerDetails = extractSafeProviderDetails(error);
   console.error(JSON.stringify({
     event: 'gemini_request_failed',
     requestId,
+    model: safeGeminiModelLabel(model),
+    phase,
     category: details.category,
     code: details.code,
     httpStatus: details.httpStatus,
     elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    ...providerDetails,
   }));
   return details;
+}
+
+function extractSafeProviderDetails(error: unknown): SafeProviderDetails {
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && typeof current === 'object' && current !== null; depth += 1) {
+    const item = current as Record<string, unknown>;
+    if (typeof item.message === 'string') {
+      try {
+        const parsed = JSON.parse(item.message) as unknown;
+        if (typeof parsed === 'object' && parsed !== null && 'error' in parsed) {
+          const providerError = (parsed as { error?: unknown }).error;
+          if (typeof providerError === 'object' && providerError !== null) {
+            const data = providerError as Record<string, unknown>;
+            const providerCode = typeof data.code === 'number' && Number.isInteger(data.code)
+              ? data.code
+              : typeof data.code === 'string' && /^[A-Z0-9_]{1,64}$/.test(data.code) ? data.code : undefined;
+            const providerStatus = typeof data.status === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(data.status)
+              ? data.status
+              : undefined;
+            if (providerCode !== undefined || providerStatus !== undefined) {
+              return {
+                ...(providerCode !== undefined ? { providerCode } : {}),
+                ...(providerStatus ? { providerStatus } : {}),
+              };
+            }
+          }
+        }
+      } catch {
+        // SDK error messages may contain non-JSON response bodies. Never log them.
+      }
+    }
+    current = item.cause;
+  }
+  return {};
+}
+
+function safeGeminiModelLabel(model: string): string {
+  return /^gemini-[A-Za-z0-9._-]{1,80}$/.test(model) ? model : 'other';
+}
+
+function safeResponseOriginHint(response: Response): string {
+  const server = response.headers.get('server')?.toLowerCase() ?? '';
+  if (server.includes('google')) return 'google_server_header';
+  if (server.includes('cloudflare') || response.headers.has('cf-ray')) return 'cloudflare_edge_header';
+  if (response.headers.has('via')) return 'via_header_present';
+  return server ? 'other_server_header' : 'unavailable';
+}
+
+function createDiagnosticFetch(fetchImpl: typeof fetch, requestId: string, model: string): typeof fetch {
+  return async (input, init) => {
+    const response = await fetchImpl(input, init);
+    console.info(JSON.stringify({
+      event: 'gemini_http_response_received',
+      requestId,
+      model: safeGeminiModelLabel(model),
+      phase: 'generate_content',
+      httpStatus: response.status,
+      responseOriginHint: safeResponseOriginHint(response),
+      viaHeaderPresent: response.headers.has('via'),
+      googleRequestIdPresent: response.headers.has('x-goog-request-id'),
+      cloudflareRayPresent: response.headers.has('cf-ray'),
+    }));
+    return response;
+  };
 }
 
 export function mapGeminiProviderFailure(error: unknown): ProviderError {
@@ -213,18 +286,29 @@ export async function assessWithGemini(
   apiKey: string,
   model: string,
   requestId: string,
+  fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<unknown> {
-  // Keep the existing bounded deadline and single SDK attempt.
+  // Keep one SDK attempt and a bounded request deadline. A returned HTTP 504
+  // is classified as a response, not assumed to be this SDK timer firing.
   const startedAt = performance.now();
   console.info(JSON.stringify({
     event: 'gemini_request_started',
     requestId,
-    timeoutMs: 90_000,
+    model: safeGeminiModelLabel(model),
+    phase: 'generate_content',
+    imageMimeType: mimeType,
+    imageBytes: image.byteLength,
+    timeoutMs: 120_000,
     attemptLimit: 1,
+    thinkingLevel: 'low',
   }));
   let response;
   try {
-    const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 90_000, retryOptions: { attempts: 1 } } });
+    const ai = new GoogleGenAI({ apiKey, httpOptions: {
+      timeout: 120_000,
+      retryOptions: { attempts: 1 },
+      fetch: createDiagnosticFetch(fetchImpl, requestId, model),
+    } });
     response = await ai.models.generateContent({
       model,
       contents: [{
@@ -238,17 +322,33 @@ export async function assessWithGemini(
         responseMimeType: 'application/json',
         responseSchema,
         maxOutputTokens: 2048,
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       },
     });
   } catch (error) {
-    logGeminiFailure(error, startedAt, requestId);
+    logGeminiFailure(error, startedAt, requestId, model, 'generate_content');
     throw mapGeminiProviderFailure(error);
   }
-
-  console.info(JSON.stringify({
-    event: 'gemini_request_finished',
-    requestId,
-    elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
-  }));
-  return parseGeminiResponseText(response.text);
+  try {
+    const result = parseGeminiResponseText(response.text);
+    console.info(JSON.stringify({
+      event: 'gemini_response_parsed',
+      requestId,
+      model: safeGeminiModelLabel(model),
+      phase: 'parse_response',
+      elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    }));
+    return result;
+  } catch (error) {
+    const code = error instanceof ProviderError ? error.code : 'INVALID_MODEL_RESPONSE';
+    console.warn(JSON.stringify({
+      event: 'gemini_response_parse_failed',
+      requestId,
+      model: safeGeminiModelLabel(model),
+      phase: 'parse_response',
+      code,
+      elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    }));
+    throw error;
+  }
 }

@@ -1,9 +1,10 @@
 import cors from 'cors';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import helmet from 'helmet';
 import multer from 'multer';
+import { isIP } from 'node:net';
 import { fileTypeFromBuffer } from 'file-type';
 import sharp from 'sharp';
 import { z } from 'zod';
@@ -14,6 +15,24 @@ const scanIdSchema = z.string().regex(/^scan-[a-zA-Z0-9-]{1,80}$/);
 const cropSchema = z.enum(cropTypes);
 const observationsSchema = z.string().max(1000).optional().default('');
 const customCropNameSchema = z.string().trim().min(1).max(80).refine((value) => !/[<>]/.test(value) && ![...value].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)).optional();
+
+// Render sets these process environment variables; callers cannot select them
+// with request headers. Trust CF-Connecting-IP only on Render public web services.
+export function shouldTrustRenderEdgeClientIp(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.RENDER === 'true' && env.RENDER_SERVICE_TYPE === 'web';
+}
+
+// Never use X-Forwarded-For: callers can supply a spoofed value. Validate the
+// trusted edge header and otherwise fall back to the direct socket address.
+export function resolveRateLimitClientKey(
+  edgeHeader: string | undefined,
+  socketAddress: string | undefined,
+  trustRenderEdgeHeader: boolean,
+): string {
+  const edgeAddress = trustRenderEdgeHeader ? edgeHeader?.trim() : undefined;
+  const candidate = edgeAddress && isIP(edgeAddress) ? edgeAddress : socketAddress?.trim() ?? '';
+  return isIP(candidate) ? ipKeyGenerator(candidate) : 'unknown-client';
+}
 
 export interface AnalyzeDependencies {
   verifyIdToken: (token: string) => Promise<{ uid: string }>;
@@ -144,6 +163,12 @@ function sendPhotoStorageError(res: express.Response, error: unknown, operation:
 
 export function createApp(deps: AnalyzeDependencies) {
   const app = express();
+  const trustRenderEdgeHeader = shouldTrustRenderEdgeClientIp();
+  const rateLimitClientKey = (req: express.Request) => resolveRateLimitClientKey(
+    req.header('cf-connecting-ip'),
+    req.socket?.remoteAddress,
+    trustRenderEdgeHeader,
+  );
   const maxImageBytes = deps.maxImageBytes ?? 8 * 1024 * 1024;
   const maxImageMb = Math.floor(maxImageBytes / (1024 * 1024));
   const upload = multer({
@@ -161,7 +186,7 @@ export function createApp(deps: AnalyzeDependencies) {
     allowedHeaders: ['Authorization', 'Content-Type'],
   }));
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
-  const translationLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false });
+  const translationLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false, keyGenerator: rateLimitClientKey });
   app.post('/api/assessment/translate-pidgin', translationLimiter, (req, res) => {
     express.json({ limit: '32kb' })(req, res, (parseError?: unknown) => {
       void (async () => {
@@ -186,7 +211,7 @@ export function createApp(deps: AnalyzeDependencies) {
   });
   const photoStore = deps.photoStore;
   if (photoStore) {
-    const photoLimiter = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false });
+    const photoLimiter = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false, keyGenerator: rateLimitClientKey });
     app.use('/api/scans/:scanId/photo', photoLimiter);
 
     app.post('/api/scans/:scanId/photo', (req, res) => {
@@ -295,6 +320,7 @@ export function createApp(deps: AnalyzeDependencies) {
     limit: deps.limiterMax ?? 5,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
+    keyGenerator: rateLimitClientKey,
     message: { error: { code: 'RATE_LIMITED', message: 'Too many analysis requests. Please wait before trying again.', retryable: true } },
   }));
 

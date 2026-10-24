@@ -3,8 +3,8 @@ import { describe, it } from 'node:test';
 import request from 'supertest';
 import sharp from 'sharp';
 import type { CropAssessmentResult } from '../src/assessmentSchema.js';
-import { createApp, ProviderError, type AnalyzeDependencies } from '../src/app.js';
-import { classifyGeminiFailure, mapGeminiProviderFailure, parseGeminiResponseText, preservesNumbers } from '../src/gemini.js';
+import { createApp, ProviderError, resolveRateLimitClientKey, shouldTrustRenderEdgeClientIp, type AnalyzeDependencies } from '../src/app.js';
+import { assessWithGemini, classifyGeminiFailure, mapGeminiProviderFailure, parseGeminiResponseText, preservesNumbers } from '../src/gemini.js';
 
 const png = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#30a060' } }).png().toBuffer();
 const assessment: CropAssessmentResult = {
@@ -62,6 +62,96 @@ describe('Gemini failure diagnostics', () => {
     assert.equal(JSON.stringify(diagnostics).includes('sensitive'), false);
   });
 
+  it('logs safe model, phase, HTTP and provider status details without response content or credentials', async () => {
+    const logs: string[] = [];
+    const originalInfo = console.info;
+    const originalWarn = console.warn;
+    const originalError = console.error;
+    console.info = (...args: unknown[]) => { logs.push(args.map(String).join(' ')); };
+    console.warn = (...args: unknown[]) => { logs.push(args.map(String).join(' ')); };
+    console.error = (...args: unknown[]) => { logs.push(args.map(String).join(' ')); };
+    const apiKey = 'unit-test-secret-key';
+    const privateProviderMessage = 'private provider response detail';
+    let fetchCalls = 0;
+    let requestPath = '';
+    let requestMethod = '';
+    let requestTimeoutHeader = '';
+    let requestPayload: Record<string, unknown> | undefined;
+    try {
+      await assert.rejects(
+        assessWithGemini(Buffer.from('synthetic-image-bytes'), 'image/png', 'Cassava', 'private farmer note', apiKey, 'gemini-3.8-flash', 'safe-request-id', async (input, init) => {
+          fetchCalls += 1;
+          requestPath = new URL(String(input)).pathname;
+          requestMethod = init?.method ?? '';
+          requestTimeoutHeader = new Headers(init?.headers).get('x-server-timeout') ?? '';
+          requestPayload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return Response.json({ error: { code: 504, status: 'DEADLINE_EXCEEDED', message: privateProviderMessage } }, {
+            status: 504,
+            headers: { server: 'Google Frontend', 'x-goog-request-id': 'provider-request-reference' },
+          });
+        }),
+        (error: unknown) => error instanceof ProviderError && error.code === 'GEMINI_TIMEOUT',
+      );
+    } finally {
+      console.info = originalInfo;
+      console.warn = originalWarn;
+      console.error = originalError;
+    }
+
+    assert.equal(fetchCalls, 1, 'SDK attempt limit must prevent retrying the provider request');
+    assert.equal(requestPath, '/v1beta/models/gemini-3.8-flash:generateContent');
+    assert.equal(requestMethod, 'POST');
+    assert.equal(requestTimeoutHeader, '120');
+    assert.ok(requestPayload);
+    const generationConfig = requestPayload.generationConfig as Record<string, unknown>;
+    const thinkingConfig = generationConfig.thinkingConfig as Record<string, unknown>;
+    const contents = requestPayload.contents as Array<{ parts: Array<Record<string, unknown>> }>;
+    assert.equal(thinkingConfig.thinkingLevel, 'LOW');
+    assert.equal(contents[0]?.parts[1]?.inlineData && (contents[0].parts[1]!.inlineData as Record<string, unknown>).mimeType, 'image/png');
+    const entries = logs.map((line) => JSON.parse(line) as Record<string, unknown>);
+    const started = entries.find((entry) => entry.event === 'gemini_request_started');
+    const response = entries.find((entry) => entry.event === 'gemini_http_response_received');
+    const failed = entries.find((entry) => entry.event === 'gemini_request_failed');
+    assert.equal(started?.model, 'gemini-3.8-flash');
+    assert.equal(started?.phase, 'generate_content');
+    assert.equal(started?.thinkingLevel, 'low');
+    assert.equal(response?.httpStatus, 504);
+    assert.equal(response?.responseOriginHint, 'google_server_header');
+    assert.equal(failed?.httpStatus, 504);
+    assert.equal(failed?.providerCode, 504);
+    assert.equal(failed?.providerStatus, 'DEADLINE_EXCEEDED');
+    const serializedLogs = logs.join('\n');
+    for (const sensitive of [apiKey, privateProviderMessage, 'private farmer note', 'synthetic-image-bytes', 'provider-request-reference']) {
+      assert.equal(serializedLogs.includes(sensitive), false, `diagnostics must not include ${sensitive}`);
+    }
+  });
+
+  it('sends a single supported GenerateContent request and parses a mocked assessment response', async () => {
+    const originalInfo = console.info;
+    const logs: string[] = [];
+    console.info = (...args: unknown[]) => { logs.push(args.map(String).join(' ')); };
+    let fetchCalls = 0;
+    let requestPayload: Record<string, unknown> | undefined;
+    try {
+      const result = await assessWithGemini(Buffer.from('synthetic-image-bytes'), 'image/png', 'Cassava', '', 'unit-test-secret-key', 'gemini-3.8-flash', 'mock-success-id', async (_input, init) => {
+        fetchCalls += 1;
+        requestPayload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return Response.json({ candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify(assessment) }] }, finishReason: 'STOP' }] });
+      });
+      assert.deepEqual(result, assessment);
+    } finally {
+      console.info = originalInfo;
+    }
+
+    assert.equal(fetchCalls, 1);
+    assert.ok(requestPayload);
+    const generationConfig = requestPayload.generationConfig as Record<string, unknown>;
+    const thinkingConfig = generationConfig.thinkingConfig as Record<string, unknown>;
+    assert.equal(thinkingConfig.thinkingLevel, 'LOW');
+    assert.ok(logs.some((line) => line.includes('"event":"gemini_response_parsed"')));
+    assert.equal(logs.join('\n').includes('unit-test-secret-key'), false);
+  });
+
   it('maps an upstream gateway timeout to the retryable timeout response', () => {
     const failure = mapGeminiProviderFailure(Object.assign(new Error('gateway response'), { status: 504 }));
     assert.equal(failure.code, 'GEMINI_TIMEOUT');
@@ -111,7 +201,97 @@ function setup(overrides: Partial<AnalyzeDependencies> = {}) {
 
 const auth = { Authorization: 'Bearer valid-owner-token' };
 
+describe('rate-limit client identity', () => {
+  it('keeps Express proxy trust disabled', () => {
+    const { app } = setup();
+    assert.equal(app.get('trust proxy'), false);
+  });
+
+  it('trusts the edge header only for a Render public web service', () => {
+    assert.equal(shouldTrustRenderEdgeClientIp({ RENDER: 'true', RENDER_SERVICE_TYPE: 'web' }), true);
+    assert.equal(shouldTrustRenderEdgeClientIp({ RENDER: 'true', RENDER_SERVICE_TYPE: 'pserv' }), false);
+    assert.equal(shouldTrustRenderEdgeClientIp({ RENDER: 'false', RENDER_SERVICE_TYPE: 'web' }), false);
+    assert.equal(shouldTrustRenderEdgeClientIp({}), false);
+  });
+
+  it('uses a valid trusted edge IP and ignores it when the Render trust gate is off', () => {
+    const trusted = resolveRateLimitClientKey('203.0.113.10', '10.0.0.2', true);
+    assert.notEqual(trusted, resolveRateLimitClientKey('203.0.113.11', '10.0.0.2', true));
+    assert.equal(resolveRateLimitClientKey('203.0.113.10', '10.0.0.2', false), resolveRateLimitClientKey('203.0.113.11', '10.0.0.2', false));
+  });
+
+  it('falls back to a validated socket IP for missing, malformed, or untrusted edge headers', () => {
+    const socketKey = resolveRateLimitClientKey(undefined, '10.0.0.2', true);
+    assert.equal(resolveRateLimitClientKey('not-an-ip', '10.0.0.2', true), socketKey);
+    assert.equal(resolveRateLimitClientKey('203.0.113.9', '10.0.0.2', false), socketKey);
+    assert.equal(resolveRateLimitClientKey('203.0.113.9, 10.0.0.2', '10.0.0.2', true), socketKey);
+  });
+
+  it('keys Render rate limits by the overwritten client-IP header and ignores spoofed X-Forwarded-For', async () => {
+    const previousRender = process.env.RENDER;
+    const previousServiceType = process.env.RENDER_SERVICE_TYPE;
+    const originalError = console.error;
+    const errors: string[] = [];
+    process.env.RENDER = 'true';
+    process.env.RENDER_SERVICE_TYPE = 'web';
+    console.error = (...args: unknown[]) => { errors.push(args.map(String).join(' ')); };
+    try {
+      const { app } = setup({ limiterMax: 1 });
+      const firstClientRequest = await request(app).post('/api/analyze-crop')
+        .set('CF-Connecting-IP', '203.0.113.10')
+        .set('X-Forwarded-For', '198.51.100.10');
+      const sameClientSpoofingRequest = await request(app).post('/api/analyze-crop')
+        .set('CF-Connecting-IP', '203.0.113.10')
+        .set('X-Forwarded-For', '198.51.100.11');
+      const secondClientRequest = await request(app).post('/api/analyze-crop')
+        .set('CF-Connecting-IP', '203.0.113.11')
+        .set('X-Forwarded-For', '198.51.100.10');
+      assert.equal(firstClientRequest.status, 401);
+      assert.equal(sameClientSpoofingRequest.status, 429);
+      assert.equal(secondClientRequest.status, 401);
+      assert.equal(app.get('trust proxy'), false);
+      assert.equal(errors.some((line) => line.includes('ERR_ERL_UNEXPECTED_X_FORWARDED_FOR')), false);
+    } finally {
+      console.error = originalError;
+      if (previousRender === undefined) delete process.env.RENDER;
+      else process.env.RENDER = previousRender;
+      if (previousServiceType === undefined) delete process.env.RENDER_SERVICE_TYPE;
+      else process.env.RENDER_SERVICE_TYPE = previousServiceType;
+    }
+  });
+
+  it('uses a safe shared fallback if neither edge nor socket address is valid', () => {
+    assert.equal(resolveRateLimitClientKey(undefined, undefined, true), 'unknown-client');
+    assert.equal(resolveRateLimitClientKey('invalid', 'also-invalid', true), 'unknown-client');
+    assert.equal(resolveRateLimitClientKey('203.0.113.9', 'also-invalid', false), 'unknown-client');
+  });
+
+  it('normalizes IPv6 keys consistently using express-rate-limit subnet handling', () => {
+    const sameSubnetA = resolveRateLimitClientKey('2001:db8::1', undefined, true);
+    const sameSubnetB = resolveRateLimitClientKey('2001:db8::2', undefined, true);
+    const differentSubnet = resolveRateLimitClientKey('2001:db8:1::1', undefined, true);
+    assert.equal(sameSubnetA, sameSubnetB);
+    assert.notEqual(sameSubnetA, differentSubnet);
+  });
+});
+
 describe('POST /api/analyze-crop', () => {
+  it('ignores caller-controlled forwarded headers outside Render and safely falls back for invalid edge IPs', async () => {
+    assert.equal(shouldTrustRenderEdgeClientIp(), false, 'this local test must run outside a Render public web service');
+    const { app } = setup({ limiterMax: 1 });
+    const withoutEdgeHeader = await request(app).post('/api/analyze-crop')
+      .set('X-Forwarded-For', '198.51.100.1');
+    const malformedEdgeHeader = await request(app).post('/api/analyze-crop')
+      .set('CF-Connecting-IP', 'not-an-ip')
+      .set('X-Forwarded-For', '198.51.100.99');
+    const untrustedEdgeHeader = await request(app).post('/api/analyze-crop')
+      .set('CF-Connecting-IP', '203.0.113.10')
+      .set('X-Forwarded-For', '198.51.100.200');
+    assert.equal(withoutEdgeHeader.status, 401);
+    assert.equal(malformedEdgeHeader.status, 429);
+    assert.equal(untrustedEdgeHeader.status, 429);
+  });
+
   it('rejects missing and invalid Firebase ID tokens', async () => {
     const { app } = setup();
     assert.equal((await request(app).post('/api/analyze-crop')).status, 401);
