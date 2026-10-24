@@ -94,9 +94,16 @@ export function classifyGeminiFailure(error: unknown): GeminiFailureDiagnostics 
   return { category: 'provider', code: 'UNKNOWN_PROVIDER_ERROR' };
 }
 
-function logGeminiFailure(error: unknown, startedAt: number): GeminiFailureDiagnostics {
+function logGeminiFailure(error: unknown, startedAt: number, requestId: string): GeminiFailureDiagnostics {
   const details = classifyGeminiFailure(error);
-  console.error(`Assessment provider request failed; category=${details.category}; code=${details.code}; httpStatus=${details.httpStatus ?? 'none'}; elapsedMs=${Math.max(0, Math.round(performance.now() - startedAt))}.`);
+  console.error(JSON.stringify({
+    event: 'gemini_request_failed',
+    requestId,
+    category: details.category,
+    code: details.code,
+    httpStatus: details.httpStatus,
+    elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+  }));
   return details;
 }
 
@@ -205,11 +212,19 @@ export async function assessWithGemini(
   observations: string,
   apiKey: string,
   model: string,
+  requestId: string,
 ): Promise<unknown> {
-  const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 90_000, retryOptions: { attempts: 1 } } });
+  // Keep the existing bounded deadline and single SDK attempt.
   const startedAt = performance.now();
+  console.info(JSON.stringify({
+    event: 'gemini_request_started',
+    requestId,
+    timeoutMs: 90_000,
+    attemptLimit: 1,
+  }));
   let response;
   try {
+    const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 90_000, retryOptions: { attempts: 1 } } });
     response = await ai.models.generateContent({
       model,
       contents: [{
@@ -226,9 +241,14 @@ export async function assessWithGemini(
       },
     });
   } catch (error) {
-    logGeminiFailure(error, startedAt);
+    logGeminiFailure(error, startedAt, requestId);
     throw mapGeminiProviderFailure(error);
   }
 
+  console.info(JSON.stringify({
+    event: 'gemini_request_finished',
+    requestId,
+    elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+  }));
   return parseGeminiResponseText(response.text);
 }

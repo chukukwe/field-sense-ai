@@ -194,6 +194,64 @@ describe('POST /api/analyze-crop', () => {
     assert.deepEqual(persisted, [assessment]);
   });
 
+  it('logs correlated assessment start and completion timings without scan or user data', async () => {
+    const entries: string[] = [];
+    const originalInfo = console.info;
+    let providerRequestId = '';
+    console.info = (...args: unknown[]) => { entries.push(args.map(String).join(' ')); };
+    try {
+      const { app } = setup({
+        assessImage: async (_image, _mime, _crop, _observations, requestId) => {
+          providerRequestId = requestId;
+          return assessment;
+        },
+      });
+      const response = await request(app).post('/api/analyze-crop').set(auth)
+        .field('scanId', 'scan-test').field('cropType', 'Cassava')
+        .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+      assert.equal(response.status, 200);
+    } finally {
+      console.info = originalInfo;
+    }
+
+    const events = entries.map((line) => JSON.parse(line) as Record<string, unknown>);
+    const started = events.find((entry) => entry.event === 'assessment_started');
+    const completed = events.find((entry) => entry.event === 'assessment_completed');
+    assert.ok(started && completed);
+    assert.equal(started.requestId, providerRequestId);
+    assert.equal(completed.requestId, providerRequestId);
+    assert.equal(typeof started.requestPreparationMs, 'number');
+    assert.equal(typeof completed.providerElapsedMs, 'number');
+    assert.equal(typeof completed.totalElapsedMs, 'number');
+    assert.equal(entries.join('\n').includes('scan-test'), false);
+    assert.equal(entries.join('\n').includes('valid-owner-token'), false);
+  });
+
+  it('logs a sanitized failure category and timing when the provider fails', async () => {
+    const entries: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => { entries.push(args.map(String).join(' ')); };
+    try {
+      const { app } = setup({ assessImage: async () => { throw new ProviderError('GEMINI_TIMEOUT', 504); } });
+      const response = await request(app).post('/api/analyze-crop').set(auth)
+        .field('scanId', 'scan-test').field('cropType', 'Cassava')
+        .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+      assert.equal(response.status, 504);
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    const failure = entries.map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((entry) => entry.event === 'assessment_failed');
+    assert.ok(failure);
+    assert.equal(failure.failureCategory, 'GEMINI_TIMEOUT');
+    assert.equal(failure.httpStatus, 504);
+    assert.equal(typeof failure.providerElapsedMs, 'number');
+    assert.equal(typeof failure.totalElapsedMs, 'number');
+    assert.equal(entries.join('\n').includes('scan-test'), false);
+    assert.equal(entries.join('\n').includes('valid-owner-token'), false);
+  });
+
   it('accepts supported JPEG, PNG, and WebP photos with matching provider MIME types', async () => {
     const images = [
       { mime: 'image/jpeg', bytes: await sharp({ create: { width: 2, height: 2, channels: 3, background: '#30a060' } }).jpeg().toBuffer() },

@@ -1,4 +1,5 @@
 import cors from 'cors';
+import { randomUUID } from 'node:crypto';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
@@ -24,7 +25,7 @@ export interface AnalyzeDependencies {
   ) => Promise<'claimed' | 'processing' | 'complete' | 'missing'>;
   saveAssessment: (uid: string, scanId: string, assessment: CropAssessmentResult) => Promise<void>;
   failScan: (uid: string, scanId: string, publicMessage: string) => Promise<void>;
-  assessImage: (image: Buffer, mimeType: string, cropType: string, observations: string) => Promise<unknown>;
+  assessImage: (image: Buffer, mimeType: string, cropType: string, observations: string, requestId: string) => Promise<unknown>;
   translateAssessment?: (assessment: CropAssessmentResult) => Promise<unknown>;
   allowedOrigins: string[];
   limiterMax?: number;
@@ -95,6 +96,15 @@ async function prepareAssessmentImage(image: Buffer, mimeType: string) {
 
 function sendError(res: express.Response, status: number, code: string, message: string, retryable = false) {
   return res.status(status).json({ error: { code, message, retryable } });
+}
+
+function logAssessmentEvent(
+  level: 'info' | 'warn',
+  event: string,
+  requestId: string,
+  details: Record<string, string | number | boolean | undefined> = {},
+) {
+  console[level](JSON.stringify({ event, requestId, ...details }));
 }
 
 function safeFirestoreErrorCode(error: unknown): string {
@@ -289,6 +299,8 @@ export function createApp(deps: AnalyzeDependencies) {
   }));
 
   app.post('/api/analyze-crop', (req, res) => {
+    const requestId = randomUUID();
+    const requestStartedAt = performance.now();
     const tokenMatch = /^Bearer\s+(\S+)$/i.exec(req.header('authorization') ?? '');
     if (!tokenMatch) return sendError(res, 401, 'AUTH_REQUIRED', 'Sign in again before requesting an assessment.');
 
@@ -342,24 +354,49 @@ export function createApp(deps: AnalyzeDependencies) {
             if (claim === 'complete') return sendError(res, 409, 'ALREADY_ASSESSED', 'This scan already has an assessment.');
             if (claim === 'processing') return sendError(res, 409, 'ALREADY_PROCESSING', 'This scan is already being assessed.');
             const providerStartedAt = performance.now();
+            logAssessmentEvent('info', 'assessment_started', requestId, {
+              requestPreparationMs: Math.max(0, Math.round(providerStartedAt - requestStartedAt)),
+              imagePreparationMs: assessmentImage.processingMs,
+            });
+            let providerElapsedMs: number | undefined;
             try {
-              const raw = await deps.assessImage(assessmentImage.buffer, assessmentImage.mimeType, customCropResult.data ?? cropType, observationsResult.data);
+              const raw = await deps.assessImage(assessmentImage.buffer, assessmentImage.mimeType, customCropResult.data ?? cropType, observationsResult.data, requestId);
+              providerElapsedMs = Math.max(0, Math.round(performance.now() - providerStartedAt));
               const parsed = assessmentSchema.safeParse(raw);
               if (!parsed.success) throw new ProviderError('INVALID_MODEL_RESPONSE', 502, 'The assessment could not be validated. You can retry this scan.');
               try {
                 await deps.saveAssessment(uid, scanId, parsed.data);
               } catch (error) {
                 logFirestoreFailure('save_assessment', error);
+                logAssessmentEvent('warn', 'assessment_failed', requestId, {
+                  failureCategory: 'ASSESSMENT_SAVE_FAILED',
+                  httpStatus: 503,
+                  providerElapsedMs,
+                  imagePreparationMs: assessmentImage.processingMs,
+                  totalElapsedMs: Math.max(0, Math.round(performance.now() - requestStartedAt)),
+                });
                 await deps.failScan(uid, scanId, 'Your result could not be saved. You can retry this scan.')
                   .catch((failure: unknown) => logFirestoreFailure('mark_save_failure', failure));
                 return sendError(res, 503, 'ASSESSMENT_SAVE_FAILED', 'Your assessment could not be saved to your account. Retry this scan when your connection is ready.', true);
               }
+              logAssessmentEvent('info', 'assessment_completed', requestId, {
+                providerElapsedMs,
+                imagePreparationMs: assessmentImage.processingMs,
+                totalElapsedMs: Math.max(0, Math.round(performance.now() - requestStartedAt)),
+              });
               return res.status(200).json({ assessment: parsed.data });
             } catch (error) {
               const failure = error instanceof ProviderError
                 ? error
                 : new ProviderError('ASSESSMENT_FAILED', 502, 'The crop assessment service could not complete this request. Try again later.');
-              console.warn(`Crop assessment failed; category=${failure.code}; httpStatus=${failure.status}; providerElapsedMs=${Math.max(0, Math.round(performance.now() - providerStartedAt))}; imagePrepareMs=${assessmentImage.processingMs}; sourceImageBytes=${file.buffer.length}; providerImageBytes=${assessmentImage.buffer.length}; providerImageWidth=${assessmentImage.width}; providerImageHeight=${assessmentImage.height}.`);
+              providerElapsedMs ??= Math.max(0, Math.round(performance.now() - providerStartedAt));
+              logAssessmentEvent('warn', 'assessment_failed', requestId, {
+                failureCategory: failure.code,
+                httpStatus: failure.status,
+                providerElapsedMs,
+                imagePreparationMs: assessmentImage.processingMs,
+                totalElapsedMs: Math.max(0, Math.round(performance.now() - requestStartedAt)),
+              });
               await deps.failScan(uid, scanId, failure.publicMessage)
                 .catch((updateError: unknown) => logFirestoreFailure('mark_assessment_failure', updateError));
               return sendError(res, failure.status, failure.code, failure.publicMessage, failure.retryable);

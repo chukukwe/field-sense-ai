@@ -124,9 +124,9 @@ const app = createApp({
       updatedAt: FieldValue.serverTimestamp(),
     });
   },
-  assessImage: (image, mime, crop, observations) => {
+  assessImage: (image, mime, crop, observations, requestId) => {
     if (!apiKey) throw new ProviderError('GEMINI_NOT_CONFIGURED', 503, 'The assessment service is not configured yet. Contact the app administrator.');
-    return assessWithGemini(image, mime, crop, observations, apiKey, model);
+    return assessWithGemini(image, mime, crop, observations, apiKey, model, requestId);
   },
   translateAssessment: (assessment) => {
     if (!apiKey) throw new ProviderError('GEMINI_NOT_CONFIGURED', 503, 'Pidgin translation is not available right now. Your English result is still available.');
