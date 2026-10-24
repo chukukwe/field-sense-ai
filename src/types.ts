@@ -18,6 +18,9 @@ export interface ScanItem {
   footerActionLabel: string;
   imageUrl: string;
   photoStorageKey?: string;
+  /** Legacy private Firebase Storage object path retained for migration compatibility. */
+  firebasePhotoPath?: string;
+  /** Private Supabase Storage object path used for account-synced crop photos. */
   cloudPhotoPath?: string;
   photoScope?: 'cloud' | 'local-only' | 'missing';
   dataScope?: 'cloud' | 'local-only';

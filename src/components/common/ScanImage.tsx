@@ -13,10 +13,14 @@ interface ScanImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
 export const ScanImage: React.FC<ScanImageProps> = ({ scan, fallbackIconOnly = false, ...imageProps }) => {
   const [storedPhoto, setStoredPhoto] = useState<{ key: string; url: string } | null>(null);
   const { user } = useAuth();
-  const resourceKey = `${scan.id}|${scan.photoStorageKey ?? ''}|${scan.cloudPhotoPath ?? ''}|${user?.uid ?? ''}`;
+  const previewUrl = scan.imageUrl.startsWith('blob:') ? scan.imageUrl : null;
+  const resourceKey = `${scan.id}|${scan.imageUrl}|${scan.photoStorageKey ?? ''}|${scan.cloudPhotoPath ?? ''}|${user?.uid ?? ''}`;
   const storedPhotoUrl = storedPhoto?.key === resourceKey ? storedPhoto.url : null;
 
   useEffect(() => {
+    // This URL is owned by the selected photo, so reuse it without reloading
+    // storage or revoking it when this image component unmounts.
+    if (previewUrl) return;
     let active = true;
     let objectUrl: string | null = null;
 
@@ -39,7 +43,7 @@ export const ScanImage: React.FC<ScanImageProps> = ({ scan, fallbackIconOnly = f
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [scan.photoStorageKey, scan.cloudPhotoPath, scan.id, user, resourceKey]);
+  }, [previewUrl, scan.photoStorageKey, scan.cloudPhotoPath, scan.id, user, resourceKey]);
 
   if (!storedPhotoUrl && !scan.imageUrl) {
     if (fallbackIconOnly) {
@@ -69,5 +73,5 @@ export const ScanImage: React.FC<ScanImageProps> = ({ scan, fallbackIconOnly = f
     );
   }
 
-  return <img {...imageProps} src={storedPhotoUrl ?? scan.imageUrl} />;
+  return <img {...imageProps} src={previewUrl ?? storedPhotoUrl ?? scan.imageUrl} />;
 };

@@ -119,12 +119,11 @@ export const ScanningScreen: React.FC = () => {
 
               // The assessment request creates the authenticated user's scan
               // record when the initial client-side Firestore save was offline.
-              // Sync the same local photo only after that record exists.
-              try {
-                const cloudPhotoPath = await uploadCropPhoto({ scanId: scan.id, image: localPhoto, idToken });
-                markPhotoSynced(scan.id, cloudPhotoPath);
-              }
-              catch { /* The local image remains available; Scan Details retries sync when reopened. */ }
+              // Sync the same local photo only after that record exists. This
+              // separate upload must not delay showing the assessment result.
+              void uploadCropPhoto({ scanId: scan.id, image: localPhoto, idToken })
+                .then((cloudPhotoPath) => { markPhotoSynced(scan.id, cloudPhotoPath); })
+                .catch(() => { /* The local image remains available; Scan Details retries sync when reopened. */ });
             }
           }
         } catch {

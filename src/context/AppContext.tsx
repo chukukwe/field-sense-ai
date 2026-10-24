@@ -8,6 +8,7 @@ import { useAuth } from './useAuth';
 import { deleteScanPhoto, getScanPhoto, saveScanPhoto } from '../data/photoStore';
 import { firebaseAuth, firestore } from '../lib/firebase';
 import { CropPhotoRequestError, deleteCloudCropPhoto, getCloudCropPhoto } from '../data/photoApi';
+import { mergeCloudScans, toCachedScan } from '../data/scanCache';
 
 const initialDraft: ScanDraft = {
   photoFile: null,
@@ -35,7 +36,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const scansStorageKey = `fieldvoice_scans_${uid}`;
   const profileStorageKey = `fieldvoice_profile_${uid}`;
   const [scans, setScans] = useState<ScanItem[]>(() => {
-    try { return JSON.parse(localStorage.getItem(`fieldvoice_scans_${uid}`) ?? '[]') as ScanItem[]; }
+    try { return (JSON.parse(localStorage.getItem(`fieldvoice_scans_${uid}`) ?? '[]') as ScanItem[]).map(toCachedScan); }
     catch { return []; }
   });
 
@@ -78,7 +79,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     if (!uid) return;
-    try { localStorage.setItem(scansStorageKey, JSON.stringify(scans)); } catch { /* local cache is best effort */ }
+    try { localStorage.setItem(scansStorageKey, JSON.stringify(scans.map(toCachedScan))); } catch { /* local cache is best effort */ }
   }, [scans, scansStorageKey, uid]);
 
   useEffect(() => {
@@ -105,22 +106,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const stopScans = onSnapshot(collection(firestore, 'users', uid, 'scans'), (snapshot) => {
       const cloudScans = snapshot.docs.map((scanDoc) => ({ ...scanDoc.data(), id: scanDoc.id, dataScope: 'cloud' as const } as ScanItem));
       let localScans: ScanItem[] = [];
-      try { localScans = JSON.parse(localStorage.getItem(scansStorageKey) ?? '[]') as ScanItem[]; } catch { /* ignore invalid local cache */ }
-      const mergedCloudScans = cloudScans.map((cloudScan) => {
-        const localScan = localScans.find((scan) => scan.id === cloudScan.id);
-        if (!localScan) return cloudScan;
-        return {
-          ...localScan,
-          ...cloudScan,
-          // The storage key points to this device's original IndexedDB photo;
-          // it must survive the server-created cloud metadata record.
-          photoStorageKey: localScan.photoStorageKey ?? cloudScan.photoStorageKey,
-          photoScope: cloudScan.photoScope ?? localScan.photoScope,
-          assessmentFailure: localScan.assessmentFailure ?? cloudScan.assessmentFailure,
-        };
-      });
-      const localOnlyScans = localScans.filter((scan) => scan.dataScope === 'local-only' && !cloudScans.some((cloudScan) => cloudScan.id === scan.id));
-      setScans([...mergedCloudScans, ...localOnlyScans]);
+      try { localScans = (JSON.parse(localStorage.getItem(scansStorageKey) ?? '[]') as ScanItem[]).map(toCachedScan); } catch { /* ignore invalid local cache */ }
+      setScans((previous) => mergeCloudScans(cloudScans, previous, localScans));
     }, () => {
       // Continue with the account-scoped local cache when Firestore is unreachable.
     });
@@ -135,7 +122,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const savedScan: ScanItem = { ...scan, assessmentStatus: scan.assessmentStatus ?? 'unavailable' };
     const localScan: ScanItem = {
       ...savedScan,
-      imageUrl: savedScan.imageUrl.startsWith('blob:') ? '' : savedScan.imageUrl,
       cloudPhotoPath: undefined,
       dataScope: 'local-only',
       footerStatus: 'Saved on this device only',
@@ -147,7 +133,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // and a delayed client write could overwrite a completed server result.
     try {
       const cached = JSON.parse(localStorage.getItem(scansStorageKey) ?? '[]') as ScanItem[];
-      localStorage.setItem(scansStorageKey, JSON.stringify([localScan, ...cached.filter((item) => item.id !== scan.id)]));
+      localStorage.setItem(scansStorageKey, JSON.stringify([localScan, ...cached.filter((item) => item.id !== scan.id)].map(toCachedScan)));
     } catch { /* in-memory state still keeps the scan available */ }
     setScans((prev) => [localScan, ...prev.filter((item) => item.id !== scan.id)]);
     return 'local-only';
@@ -156,6 +142,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const markPhotoStoredLocally = useCallback((scanId: string, photoStorageKey: string) => {
     setScans((previous) => previous.map((scan) => scan.id !== scanId ? scan : {
       ...scan,
+      // Replacing the original bytes must also replace its displayed preview.
+      imageUrl: scan.imageUrl.startsWith('blob:') ? '' : scan.imageUrl,
       photoStorageKey,
       photoScope: scan.cloudPhotoPath ? 'cloud' : 'local-only',
     }));

@@ -19,7 +19,20 @@ const viteServer = await createServer({
   configFile: false,
   root: fileURLToPath(new URL('../../', import.meta.url)),
   appType: 'custom',
-  plugins: [react()],
+  plugins: [{
+    name: 'local-photo-store-fixture',
+    // Exercise the real scan screens without requiring a browser IndexedDB implementation.
+    load(id) {
+      if (!id.replaceAll('\\', '/').endsWith('/src/data/photoStore.ts')) return null;
+      return `const photos = new Map();
+        let reads = 0;
+        export async function saveScanPhoto(id, photo) { photos.set(id, photo); }
+        export async function getScanPhoto(id) { reads += 1; return photos.get(id); }
+        export async function deleteScanPhoto(id) { photos.delete(id); }
+        export function photoReadCount() { return reads; }
+        export function resetPhotoReadCount() { reads = 0; }`;
+    },
+  }, react()],
   server: { middlewareMode: true },
 });
 const React = await import('react');
@@ -31,10 +44,14 @@ const { SeasonSenseScreen } = await viteServer.ssrLoadModule('/src/pages/SeasonS
 const { FarmGuidePlanScreen } = await viteServer.ssrLoadModule('/src/pages/FarmGuidePlanScreen.tsx');
 const { SampleCropResultScreen } = await viteServer.ssrLoadModule('/src/pages/SampleCropResultScreen.tsx');
 const { CropAssessmentScreen } = await viteServer.ssrLoadModule('/src/pages/CropAssessmentScreen.tsx');
+const { ScanningScreen } = await viteServer.ssrLoadModule('/src/pages/ScanningScreen.tsx');
+const { ScanImage } = await viteServer.ssrLoadModule('/src/components/common/ScanImage.tsx');
+const { saveScanPhoto, photoReadCount, resetPhotoReadCount } = await viteServer.ssrLoadModule('/src/data/photoStore.ts');
+const { toCachedScan, mergeCloudScans } = await viteServer.ssrLoadModule('/src/data/scanCache.ts');
 const { AppContext } = await viteServer.ssrLoadModule('/src/context/AppContextStore.ts');
 const { AuthContext } = await viteServer.ssrLoadModule('/src/context/AuthContextStore.ts');
 const { MemoryRouter, Route, Routes } = await viteServer.ssrLoadModule('/node_modules/react-router-dom/dist/index.mjs');
-const { act, createElement, StrictMode, useEffect, useRef, useState } = React;
+const { act, createElement, StrictMode, useCallback, useEffect, useRef, useState } = React;
 
 const testInput = {
   image: new Blob(['mock crop photo'], { type: 'image/png' }),
@@ -81,7 +98,7 @@ function createMount(element) {
   const root = createRoot(host);
   return {
     host,
-    async render() { await act(async () => root.render(element)); },
+    async render(nextElement = element) { await act(async () => root.render(nextElement)); },
     async unmount() {
       await act(async () => root.unmount());
       host.remove();
@@ -93,6 +110,251 @@ function deferred() {
   let resolve;
   const promise = new Promise((done) => { resolve = done; });
   return { promise, resolve };
+}
+
+test('persisted scan metadata omits page-only previews while retaining the local photo reference', () => {
+  const scan = Object.freeze({ id: 'scan-preview-cache', imageUrl: 'blob:selected-photo', photoStorageKey: 'owner/scan-preview-cache' });
+  const cached = toCachedScan(scan);
+  assert.equal(cached.imageUrl, '');
+  assert.equal(cached.photoStorageKey, scan.photoStorageKey);
+  assert.equal(scan.imageUrl, 'blob:selected-photo', 'saving metadata must not clear the live preview');
+  assert.equal(toCachedScan({ ...scan, imageUrl: '/assets/saved-photo.png' }).imageUrl, '/assets/saved-photo.png');
+});
+
+test('server scan updates preserve the live photo while updating assessment and cloud references', () => {
+  const selected = {
+    id: 'scan-preview-merge', imageUrl: 'blob:selected-photo', photoStorageKey: 'owner/scan-preview-merge',
+    dataScope: 'local-only', assessmentStatus: 'pending', firebasePhotoPath: 'old-firebase-reference',
+  };
+  const cloud = { id: selected.id, imageUrl: '', dataScope: 'cloud', assessmentStatus: 'processing' };
+  const [processing] = mergeCloudScans([cloud], [selected], [toCachedScan(selected)]);
+  assert.equal(processing.imageUrl, selected.imageUrl);
+  assert.equal(processing.photoStorageKey, selected.photoStorageKey);
+  assert.equal(processing.assessmentStatus, 'processing');
+  assert.equal(processing.firebasePhotoPath, undefined, 'cleared cloud references must remain cleared');
+
+  const cloudPhotoPath = `users/owner/scans/${selected.id}/photo`;
+  const [completed] = mergeCloudScans([{
+    ...cloud, assessmentStatus: 'completed', assessment: mockAssessment, summary: mockAssessment.summary,
+    cloudPhotoPath, photoScope: 'cloud',
+  }], [processing], [toCachedScan(selected)]);
+  assert.equal(completed.imageUrl, selected.imageUrl);
+  assert.equal(completed.assessment, mockAssessment);
+  assert.equal(completed.summary, mockAssessment.summary);
+  assert.equal(completed.assessmentStatus, 'completed');
+  assert.equal(completed.cloudPhotoPath, cloudPhotoPath);
+  assert.equal(completed.photoScope, 'cloud');
+
+  const [cleared] = mergeCloudScans([{ ...cloud, photoScope: 'local-only' }], [completed], []);
+  assert.equal(cleared.imageUrl, selected.imageUrl);
+  assert.equal(cleared.cloudPhotoPath, undefined);
+  assert.equal(cleared.photoScope, 'local-only');
+});
+
+test('a newly saved scan keeps its live photo when the server snapshot does not contain it yet', () => {
+  const selected = { id: 'scan-not-on-server-yet', imageUrl: 'blob:new-photo', photoStorageKey: 'owner/new-photo', dataScope: 'local-only' };
+  const cachedCloudScan = { id: 'removed-cloud-scan', imageUrl: '', dataScope: 'cloud' };
+  const merged = mergeCloudScans([], [selected], [toCachedScan(selected), cachedCloudScan]);
+  assert.deepEqual(merged, [selected]);
+});
+
+test('result photo reuses the selected preview without rereading or downloading it', async () => {
+  const previewUrl = URL.createObjectURL(testInput.image);
+  const originalFetch = globalThis.fetch;
+  const originalRevoke = URL.revokeObjectURL;
+  const revokedUrls = [];
+  let fetchCalls = 0;
+  const scan = {
+    id: 'scan-reused-preview',
+    imageUrl: previewUrl,
+    photoStorageKey: 'scan-reused-preview',
+    cloudPhotoPath: 'users/owner/scans/scan-reused-preview/photo',
+  };
+  const user = { uid: 'owner', async getIdToken() { return 'test-token'; } };
+  const renderPhoto = (photoScan) => createElement(StrictMode, null,
+    createElement(AuthContext.Provider, { value: { user } },
+      createElement(ScanImage, { scan: photoScan, alt: 'Selected crop photo' })));
+  await saveScanPhoto(scan.photoStorageKey, testInput.image);
+  resetPhotoReadCount();
+  globalThis.fetch = async () => { fetchCalls += 1; throw new Error('Preview must not be downloaded.'); };
+  URL.revokeObjectURL = (url) => { revokedUrls.push(url); originalRevoke(url); };
+  const mount = createMount(renderPhoto(scan));
+  try {
+    await mount.render();
+    assert.equal(mount.host.querySelector('img')?.getAttribute('src'), previewUrl);
+    assert.equal(photoReadCount(), 0);
+    assert.equal(fetchCalls, 0);
+
+    await mount.render(renderPhoto({ ...scan, cloudPhotoPath: 'users/owner/scans/scan-reused-preview/updated-photo' }));
+    assert.equal(mount.host.querySelector('img')?.getAttribute('src'), previewUrl,
+      'cloud sync metadata must not replace the already selected photo');
+    assert.equal(photoReadCount(), 0);
+    assert.equal(fetchCalls, 0);
+  } finally {
+    await mount.unmount();
+    URL.revokeObjectURL = originalRevoke;
+    globalThis.fetch = originalFetch;
+    originalRevoke(previewUrl);
+  }
+  assert.equal(revokedUrls.includes(previewUrl), false, 'the photo component does not own the selected preview URL');
+});
+
+test('saved history can load its local photo when the original preview is no longer available', async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  const scan = {
+    id: 'scan-saved-local-photo',
+    imageUrl: '',
+    photoStorageKey: 'scan-saved-local-photo',
+    cloudPhotoPath: 'users/owner/scans/scan-saved-local-photo/photo',
+  };
+  await saveScanPhoto(scan.photoStorageKey, testInput.image);
+  resetPhotoReadCount();
+  globalThis.fetch = async () => { fetchCalls += 1; throw new Error('A saved local photo should not be downloaded.'); };
+  const mount = createMount(createElement(AuthContext.Provider,
+    { value: { user: { uid: 'owner', async getIdToken() { return 'test-token'; } } } },
+    createElement(ScanImage, { scan, alt: 'Saved crop photo' })));
+  try {
+    await mount.render();
+    assert.match(mount.host.querySelector('img')?.getAttribute('src') ?? '', /^blob:/);
+    assert.equal(photoReadCount(), 1);
+    assert.equal(fetchCalls, 0);
+  } finally {
+    await mount.unmount();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+function ScanningFlowFixture({ fixture, onAssessment, onPhotoSynced, onFailure }) {
+  const [scans, setScans] = useState([]);
+  const createScanFromDraft = useCallback(() => fixture.scan, [fixture]);
+  const saveScan = useCallback(async (scan) => {
+    setScans([scan]);
+    return 'local-only';
+  }, []);
+  const applyAssessment = useCallback((scanId, assessment, status, summary) => {
+    onAssessment();
+    setScans((previous) => previous.map((scan) => scan.id === scanId
+      ? { ...scan, assessment, assessmentStatus: status, summary }
+      : scan));
+  }, [onAssessment]);
+  const markPhotoSynced = useCallback((scanId, cloudPhotoPath) => {
+    onPhotoSynced(cloudPhotoPath);
+    setScans((previous) => previous.map((scan) => scan.id === scanId
+      ? { ...scan, cloudPhotoPath, photoScope: 'cloud' }
+      : scan));
+  }, [onPhotoSynced]);
+  const markScanFailed = useCallback(async () => { onFailure(); }, [onFailure]);
+  const appContext = {
+    scans,
+    scanDraft: fixture.scanDraft,
+    createScanFromDraft,
+    saveScan,
+    applyAssessment,
+    markPhotoSynced,
+    markScanFailed,
+    resetScanDraft() {},
+    setHelpModalOpen() {},
+  };
+  return createElement(AppContext.Provider, { value: appContext },
+    createElement(AuthContext.Provider, { value: fixture.auth },
+      createElement(Routes, null,
+        createElement(Route, { path: '/scanning', element: createElement(ScanningScreen) }),
+        createElement(Route, { path: '/assessment/:id', element: createElement(CropAssessmentScreen) }))));
+}
+
+for (const uploadOutcome of ['success', 'failure']) {
+  test(`scanning shows the completed result while photo upload is pending, then handles upload ${uploadOutcome}`, { timeout: 5_000 }, async () => {
+    const photoUpload = deferred();
+    const uploadStarted = deferred();
+    const originalFetch = globalThis.fetch;
+    const calls = { assessmentRequests: 0, photoRequests: 0, assessments: 0, synced: 0, failures: 0 };
+    const scanId = `scan-photo-upload-${uploadOutcome}`;
+    const previewUrl = URL.createObjectURL(testInput.image);
+    resetPhotoReadCount();
+    const fixture = {
+      scan: {
+        id: scanId,
+        cropType: 'Cassava',
+        title: 'Cassava crop check',
+        date: 'Today',
+        imageUrl: previewUrl,
+        photoStorageKey: scanId,
+        photoScope: 'local-only',
+        assessmentStatus: 'pending',
+      },
+      scanDraft: {
+        photoFile: testInput.image,
+        photoPreviewUrl: previewUrl,
+        photoSizeMb: 0.001,
+        cropType: 'Cassava',
+        customCropName: '',
+        observations: '',
+      },
+      auth: {
+        user: { uid: 'scan-ui-user', async getIdToken() { return 'local-test-token'; } },
+        fullName: '', loading: false, configured: true,
+      },
+    };
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/api/analyze-crop')) {
+        calls.assessmentRequests += 1;
+        return Response.json({ assessment: mockAssessment });
+      }
+      if (url.endsWith(`/api/scans/${scanId}/photo`) && init?.method === 'POST') {
+        calls.photoRequests += 1;
+        uploadStarted.resolve();
+        return photoUpload.promise;
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    };
+    const mount = createMount(createElement(StrictMode, null,
+      createElement(MemoryRouter, { initialEntries: ['/scanning'] },
+        createElement(ScanningFlowFixture, {
+          fixture,
+          onAssessment() { calls.assessments += 1; },
+          onPhotoSynced(path) { calls.synced += 1; calls.syncedPath = path; },
+          onFailure() { calls.failures += 1; },
+        }))));
+    try {
+      await mount.render();
+      await act(async () => {
+        await uploadStarted.promise;
+        await delay(20);
+      });
+      assert.match(mount.host.textContent, /Mock diagnosis displayed after a successful assessment/,
+        'a separate pending photo upload must not delay the assessment result');
+      assert.doesNotMatch(mount.host.textContent, /Analyzing Crop/);
+      assert.equal(calls.assessmentRequests, 1);
+      assert.equal(calls.photoRequests, 1);
+      assert.equal(calls.assessments, 1);
+      assert.equal(calls.failures, 0);
+      assert.equal(calls.synced, 0);
+      assert.equal(mount.host.querySelector('img[alt="Cassava scan"]')?.getAttribute('src'), previewUrl);
+      assert.equal(photoReadCount(), 1, 'only the assessment request needs to read the saved photo');
+
+      await act(async () => {
+        photoUpload.resolve(uploadOutcome === 'success'
+          ? Response.json({ cloudPhotoPath: `users/scan-ui-user/scans/${scanId}/photo` })
+          : new Response('Photo storage unavailable', { status: 503 }));
+        await delay(20);
+      });
+      assert.match(mount.host.textContent, /Mock diagnosis displayed after a successful assessment/);
+      assert.equal(calls.failures, 0, 'photo sync failure must not fail a completed assessment');
+      assert.equal(calls.synced, uploadOutcome === 'success' ? 1 : 0);
+      assert.equal(calls.syncedPath, uploadOutcome === 'success'
+        ? `users/scan-ui-user/scans/${scanId}/photo` : undefined);
+      assert.equal(calls.assessmentRequests, 1);
+      assert.equal(mount.host.querySelector('img[alt="Cassava scan"]')?.getAttribute('src'), previewUrl);
+      assert.equal(photoReadCount(), 1, 'background sync must not reread the displayed photo');
+    } finally {
+      photoUpload.resolve(new Response(null, { status: 503 }));
+      await mount.unmount();
+      globalThis.fetch = originalFetch;
+      URL.revokeObjectURL(previewUrl);
+    }
+  });
 }
 
 function AssessmentHarness({ fetcher, operationRef, onCompleteStarted, prepare }) {
