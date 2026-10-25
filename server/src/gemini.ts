@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import { ProviderError } from './app.js';
 import type { CropAssessmentResult } from './assessmentSchema.js';
@@ -164,7 +165,9 @@ function safeResponseOriginHint(response: Response): string {
 
 function createDiagnosticFetch(fetchImpl: typeof fetch, requestId: string, model: string): typeof fetch {
   return async (input, init) => {
-    const response = await fetchImpl(input, init);
+    const startedAt = performance.now();
+    for (let attempt = 1; ; attempt += 1) {
+    const response = await fetchImpl(input instanceof Request ? input.clone() : input, init);
     console.info(JSON.stringify({
       event: 'gemini_http_response_received',
       requestId,
@@ -176,7 +179,16 @@ function createDiagnosticFetch(fetchImpl: typeof fetch, requestId: string, model
       googleRequestIdPresent: response.headers.has('x-goog-request-id'),
       cloudflareRayPresent: response.headers.has('cf-ray'),
     }));
-    return response;
+    // Retry only an explicit, fast unavailability response. Slow responses and
+    // ambiguous network/timeouts are never replayed automatically.
+    const waitMs = 1000 * 2 ** (attempt - 1);
+    if (response.status !== 503 || attempt >= 3
+      || performance.now() - startedAt + waitMs > 15_000 || init?.signal?.aborted) return response;
+    await response.body?.cancel();
+    console.info(JSON.stringify({ event: 'gemini_retry_scheduled', requestId,
+      model: safeGeminiModelLabel(model), attempt, waitMs, httpStatus: 503 }));
+    await delay(waitMs, undefined, { signal: init?.signal ?? undefined });
+    }
   };
 }
 
@@ -288,7 +300,8 @@ export async function assessWithGemini(
   requestId: string,
   fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<unknown> {
-  // Keep one SDK attempt and a bounded request deadline. A returned HTTP 504
+  // Keep one SDK attempt and a bounded deadline; fetch retries fast 503s only.
+  // A returned HTTP 504
   // is classified as a response, not assumed to be this SDK timer firing.
   const startedAt = performance.now();
   console.info(JSON.stringify({
@@ -299,7 +312,7 @@ export async function assessWithGemini(
     imageMimeType: mimeType,
     imageBytes: image.byteLength,
     timeoutMs: 200_000,
-    attemptLimit: 1,
+    attemptLimit: 3,
     thinkingLevel: 'low',
   }));
   let response;

@@ -152,6 +152,27 @@ describe('Gemini failure diagnostics', () => {
     assert.equal(logs.join('\n').includes('unit-test-secret-key'), false);
   });
 
+  it('recovers from fast 503 responses without changing the submitted image', async () => {
+    const bodies: unknown[] = [];
+    const result = await assessWithGemini(png, 'image/png', 'Cassava', '', 'test-key', 'gemini-3.8-flash', 'retry-test', async (_input, init) => {
+      bodies.push(init?.body);
+      if (bodies.length < 3) return Response.json({ error: { code: 503, status: 'UNAVAILABLE' } }, { status: 503 });
+      return Response.json({ candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify(assessment) }] } }] });
+    });
+    assert.deepEqual(result, assessment);
+    assert.equal(bodies.length, 3);
+    assert.ok(bodies.every((body) => body === bodies[0]));
+  });
+
+  it('stops after three unavailable responses and preserves the retryable failure', async () => {
+    let calls = 0;
+    await assert.rejects(assessWithGemini(png, 'image/png', 'Cassava', '', 'test-key', 'gemini-3.8-flash', 'retry-exhausted', async () => {
+      calls += 1;
+      return Response.json({ error: { code: 503, status: 'UNAVAILABLE' } }, { status: 503 });
+    }), (error: unknown) => error instanceof ProviderError && error.code === 'GEMINI_UNAVAILABLE' && error.retryable);
+    assert.equal(calls, 3);
+  });
+
   it('maps an upstream gateway timeout to the retryable timeout response', () => {
     const failure = mapGeminiProviderFailure(Object.assign(new Error('gateway response'), { status: 504 }));
     assert.equal(failure.code, 'GEMINI_TIMEOUT');
