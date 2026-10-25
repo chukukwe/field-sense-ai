@@ -9,11 +9,13 @@ import { useAssessmentProgress } from '../hooks/useAssessmentProgress';
 import { AssessmentProgressIndicator } from '../components/common/AssessmentProgressIndicator';
 import { useAuth } from '../context/useAuth';
 import { uploadCropPhoto } from '../data/photoApi';
+import { cropOptions, validateCropSelection } from '../data/cropFamilies';
 
 export const ScanningScreen: React.FC = () => {
   const navigate = useNavigate();
-  const { scanDraft, createScanFromDraft, saveScan, markPhotoSynced, applyAssessment, markScanFailed } = useApp();
+  const { scanDraft, resetScanDraft, createScanFromDraft, saveScan, markPhotoSynced, applyAssessment, markScanFailed } = useApp();
   const { user } = useAuth();
+  const [submittedDraft] = useState(() => scanDraft);
   const scanProcessRef = useRef<Promise<string> | null>(null);
   const {
     progress,
@@ -48,14 +50,25 @@ export const ScanningScreen: React.FC = () => {
     // interval. Resume the estimate without starting a second scan request.
     resumeProgress();
     if (!scanProcessRef.current) {
+      const file = submittedDraft.photoFile;
+      if (!file || !submittedDraft.photoPreviewUrl || !file.size || file.size > 8 * 1024 * 1024
+        || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)
+        || validateCropSelection(submittedDraft.cropType, submittedDraft.customCropName)) {
+        stopProgress();
+        navigate('/scan', { replace: true });
+        return;
+      }
       startProgress();
       scanProcessRef.current = (async () => {
         const scan = createScanFromDraft();
+        // The scan now owns its preview. Clear the form so revisiting this
+        // route cannot create a second scan from the same submitted photo.
+        resetScanDraft();
         try {
           let photoSaved = false;
-          if (scanDraft.photoFile && scan.photoStorageKey) {
+          if (submittedDraft.photoFile && scan.photoStorageKey) {
             try {
-              await saveScanPhoto(scan.photoStorageKey, scanDraft.photoFile);
+              await saveScanPhoto(scan.photoStorageKey, submittedDraft.photoFile);
               photoSaved = true;
             } catch {
               // Keep the scan metadata so the user can review the failed scan.
@@ -77,7 +90,7 @@ export const ScanningScreen: React.FC = () => {
           if (!photoSaved || !scan.photoStorageKey) {
             stopProgress();
             await markScanFailed(scan.id, 'The photo could not be saved on this device, so no assessment was requested.');
-          } else if (!scanDraft.cropType) {
+          } else if (!submittedDraft.cropType) {
             stopProgress();
             await markScanFailed(scan.id, 'Choose a crop type before requesting an assessment.');
           } else {
@@ -101,9 +114,9 @@ export const ScanningScreen: React.FC = () => {
                 setProgressPhase('uploading');
                 const assessment = await requestCropAssessment({
                   image: localPhoto,
-                  cropType: scanDraft.cropType,
-                  customCropName: scanDraft.cropType === 'Other' ? scanDraft.customCropName.trim() : undefined,
-                  observations: scanDraft.observations,
+                  cropType: submittedDraft.cropType,
+                  customCropName: submittedDraft.cropType === 'Other' ? submittedDraft.customCropName.trim() : undefined,
+                  observations: submittedDraft.observations,
                   scanId: scan.id,
                   idToken,
                 });
@@ -140,13 +153,16 @@ export const ScanningScreen: React.FC = () => {
     // React Strict Mode replays effects in development. Reuse the same scan
     // operation, but let the currently mounted effect handle navigation.
     void scanProcessRef.current.then((scanId) => {
-      if (active) navigate(`/assessment/${scanId}`);
+      if (active) navigate(`/assessment/${scanId}`, { replace: true });
     });
     return () => { active = false; };
-  }, [navigate, scanDraft.photoFile, scanDraft.cropType, scanDraft.customCropName, scanDraft.observations, createScanFromDraft, saveScan, markPhotoSynced, applyAssessment, markScanFailed, user, startProgress, resumeProgress, setProgressPhase, completeProgress, stopProgress]);
+  }, [navigate, submittedDraft, resetScanDraft, createScanFromDraft, saveScan, markPhotoSynced, applyAssessment, markScanFailed, user, startProgress, resumeProgress, setProgressPhase, completeProgress, stopProgress]);
 
-  const previewImage = scanDraft.photoPreviewUrl || '/assets/cassava-leaf-sample.png';
-  const cropLabel = scanDraft.cropType || 'Cassava';
+  const previewImage = submittedDraft.photoPreviewUrl;
+  const cropLabel = submittedDraft.customCropName || submittedDraft.cropType || '';
+  const selectedCrop = cropOptions.find((crop) => crop.type === submittedDraft.cropType);
+
+  if (!submittedDraft.photoFile || !previewImage || validateCropSelection(submittedDraft.cropType, submittedDraft.customCropName)) return null;
 
   return (
     <div className="flex flex-col gap-4 pb-4">
@@ -212,23 +228,9 @@ export const ScanningScreen: React.FC = () => {
           <p className="text-[11px] text-[#8F9490] mb-3">
             Checking the crop you selected.
           </p>
-          <div className="grid grid-cols-2 gap-2.5">
-            <div className="p-3 rounded-xl bg-[#174D38] border border-[#22C55E] text-white">
-              <p className="text-xs font-bold text-white">{cropLabel}</p>
-              <p className="text-[10px] text-white/70 mt-0.5">Akpu / Iwa</p>
-            </div>
-            <div className="p-3 rounded-xl bg-[#202321] text-[#8F9490]">
-              <p className="text-xs font-bold">Plantain</p>
-              <p className="text-[10px] mt-0.5">Banana family</p>
-            </div>
-            <div className="p-3 rounded-xl bg-[#202321] text-[#8F9490]">
-              <p className="text-xs font-bold">Maize</p>
-              <p className="text-[10px] mt-0.5">Corn / Ibokpot</p>
-            </div>
-            <div className="p-3 rounded-xl bg-[#202321] text-[#8F9490]">
-              <p className="text-xs font-bold">Vegetables</p>
-              <p className="text-[10px] mt-0.5">Ugwu / Waterleaf</p>
-            </div>
+          <div className="p-3 rounded-xl bg-[#174D38] border border-[#22C55E] text-white">
+            <p className="text-xs font-bold text-white">{cropLabel}</p>
+            <p className="text-[10px] text-white/70 mt-0.5">{selectedCrop?.family}</p>
           </div>
         </div>
 
@@ -239,11 +241,11 @@ export const ScanningScreen: React.FC = () => {
             <span className="text-xs font-semibold text-[#FF8A32]">Optional</span>
           </div>
           <div className="bg-[#181B19] text-xs text-[#8F9490] p-3.5 rounded-xl min-h-[72px] leading-relaxed">
-            {scanDraft.observations || "Describe the changes you've seen on the plant\u2026"}
+            {submittedDraft.observations || "Describe the changes you've seen on the plant\u2026"}
           </div>
           <div className="flex items-center gap-2 mt-2.5 text-[11px] text-[#8F9490]">
             <Radio className="w-3.5 h-3.5 shrink-0" />
-            <span>Voice recognition: Eket / Pidgin / English</span>
+            <span>Your crop photo and note are being checked.</span>
           </div>
         </div>
 

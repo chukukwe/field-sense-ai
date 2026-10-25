@@ -33,7 +33,7 @@ const viteServer = await createServer({
         export function resetPhotoReadCount() { reads = 0; }`;
     },
   }, react()],
-  server: { middlewareMode: true },
+  server: { middlewareMode: true, hmr: false, ws: false },
 });
 const React = await import('react');
 const { createRoot } = await import('react-dom/client');
@@ -227,6 +227,8 @@ test('saved history can load its local photo when the original preview is no lon
 
 function ScanningFlowFixture({ fixture, onAssessment, onPhotoSynced, onFailure }) {
   const [scans, setScans] = useState([]);
+  const [scanDraft, setScanDraft] = useState(fixture.scanDraft);
+  const resetScanDraft = useCallback(() => setScanDraft({ photoFile: null, photoPreviewUrl: null, photoSizeMb: 0, cropType: null, customCropName: '', observations: '' }), []);
   const createScanFromDraft = useCallback(() => fixture.scan, [fixture]);
   const saveScan = useCallback(async (scan) => {
     setScans([scan]);
@@ -247,13 +249,13 @@ function ScanningFlowFixture({ fixture, onAssessment, onPhotoSynced, onFailure }
   const markScanFailed = useCallback(async () => { onFailure(); }, [onFailure]);
   const appContext = {
     scans,
-    scanDraft: fixture.scanDraft,
+    scanDraft,
     createScanFromDraft,
     saveScan,
     applyAssessment,
     markPhotoSynced,
     markScanFailed,
-    resetScanDraft() {},
+    resetScanDraft,
     setHelpModalOpen() {},
   };
   return createElement(AppContext.Provider, { value: appContext },
@@ -621,8 +623,10 @@ test('unmounting clears the progress interval', async () => {
     return originalClearInterval(interval);
   };
 
-  const fetcher = async () => await new Promise(() => {});
-  const mount = createMount(createElement(AssessmentHarness, { fetcher }));
+  const pendingResponse = deferred();
+  const operationRef = { current: null };
+  const fetcher = async () => await pendingResponse.promise;
+  const mount = createMount(createElement(AssessmentHarness, { fetcher, operationRef }));
   try {
     await mount.render();
     await click(mount.host, '[data-action="submit"]');
@@ -633,6 +637,9 @@ test('unmounting clears the progress interval', async () => {
     globalThis.setInterval = originalSetInterval;
     globalThis.clearInterval = originalClearInterval;
     if (mount.host.isConnected) await mount.unmount();
+    // Finish the mock request so the real API deadline timer is released.
+    pendingResponse.resolve(Response.json({ error: { code: 'ASSESSMENT_UNAVAILABLE', message: 'Unmount fixture finished.' } }, { status: 503 }));
+    await operationRef.current;
   }
 });
 
@@ -744,7 +751,7 @@ test('provider failure offers an explicit sample choice and the sample is not sh
     assert.match(mount.host.textContent, /We can show you an example result while you wait\./);
     assert.doesNotMatch(mount.host.textContent, /Dry, brown edges on cassava leaves/);
     assert.equal([...mount.host.querySelectorAll('button')].some((button) => button.textContent.trim() === 'Try again'), false,
-      'a provider outage should present the requested sample-or-later choices');
+      'without a signed-in user and saved photo, samples remain an explicit choice while assessment retry is unavailable');
 
     const viewSample = [...mount.host.querySelectorAll('button')].find((button) => button.textContent.trim() === 'View sample result');
     assert.ok(viewSample);
@@ -795,6 +802,6 @@ test('a successful mocked scan result remains visible as a real assessment', asy
 });
 
 after(async () => {
-  browserWindow.happyDOM.abort();
+  await browserWindow.happyDOM.abort();
   await viteServer.close();
 });

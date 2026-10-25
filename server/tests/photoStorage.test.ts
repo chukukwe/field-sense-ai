@@ -11,12 +11,19 @@ function setup(overrides: Partial<PhotoStoreDependencies> = {}, maxImageBytes?: 
   const records = new Map<string, PhotoRecord>([['owner:scan-test', {}]]);
   const objects = new Map<string, { bytes: Buffer; type: string }>();
   const uploadedPaths: string[] = [];
+  const uploadModes: boolean[] = [];
   const removedPaths: string[] = [];
   const store: PhotoStoreDependencies = {
     getPhotoRecord: async (uid, id) => records.get(`${uid}:${id}`) ?? null,
     savePhotoReference: async (uid, id, path) => { records.set(`${uid}:${id}`, { cloudPhotoPath: path }); },
     clearPhotoReference: async (uid, id) => { records.set(`${uid}:${id}`, {}); },
-    upload: async (path, bytes, type) => { objects.set(path, { bytes, type }); uploadedPaths.push(path); },
+    upload: async (path, bytes, type, options = { upsert: true }) => {
+      uploadModes.push(options.upsert);
+      if (!options.upsert && objects.has(path)) throw new PhotoStorageError('request_rejected', 409);
+      objects.set(path, { bytes, type });
+      uploadedPaths.push(path);
+      return { created: !options.upsert };
+    },
     download: async (path) => { const object = objects.get(path); return object ? { bytes: object.bytes, contentType: object.type } : null; },
     remove: async (path) => { objects.delete(path); removedPaths.push(path); },
     ...overrides,
@@ -30,7 +37,7 @@ function setup(overrides: Partial<PhotoStoreDependencies> = {}, maxImageBytes?: 
     claimScan: async () => 'missing', saveAssessment: async () => undefined, failScan: async () => undefined,
     assessImage: async () => ({}), allowedOrigins: ['http://localhost:5173'], photoStore: store, maxImageBytes,
   };
-  return { app: createApp(deps), records, objects, uploadedPaths, removedPaths };
+  return { app: createApp(deps), records, objects, uploadedPaths, uploadModes, removedPaths };
 }
 
 describe('protected crop photo storage API', () => {
@@ -64,18 +71,51 @@ describe('protected crop photo storage API', () => {
   });
 
   it('uploads an owner-scoped image and retrieves it after a fresh token (same account on another device)', async () => {
-    const { app, uploadedPaths } = setup();
+    const { app, uploadedPaths, uploadModes } = setup();
     const upload = await request(app).post('/api/scans/scan-test/photo').set('Authorization', 'Bearer owner-token')
       .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
     assert.equal(upload.status, 200);
     assert.deepEqual(upload.body, { cloudPhotoPath: 'users/owner/scans/scan-test/photo' });
     assert.deepEqual(uploadedPaths, ['users/owner/scans/scan-test/photo']);
+    assert.deepEqual(uploadModes, [false]);
 
     const retrieved = await request(app).get('/api/scans/scan-test/photo').set('Authorization', 'Bearer new-owner-token');
     assert.equal(retrieved.status, 200);
     assert.equal(retrieved.headers['content-type'], 'image/png');
     assert.equal(retrieved.headers['cache-control'], 'private, no-store');
     assert.deepEqual(retrieved.body, png);
+  });
+
+  it('retries an existing owner-scoped photo at the exact same path with upsert enabled', async () => {
+    const { app, records, objects, uploadedPaths, uploadModes } = setup();
+    const expectedPath = 'users/owner/scans/scan-test/photo';
+    records.set('owner:scan-test', { cloudPhotoPath: expectedPath });
+
+    const response = await request(app).post('/api/scans/scan-test/photo').set('Authorization', 'Bearer owner-token')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { cloudPhotoPath: expectedPath });
+    assert.deepEqual(uploadedPaths, [expectedPath]);
+    assert.deepEqual(uploadModes, [true]);
+    assert.equal(objects.size, 1);
+    assert.deepEqual(records.get('owner:scan-test'), { cloudPhotoPath: expectedPath });
+  });
+
+  it('fails a first-time upload collision without overwriting or deleting the existing object', async () => {
+    const { app, objects, records, uploadModes, removedPaths } = setup();
+    const path = 'users/owner/scans/scan-test/photo';
+    const existingBytes = Buffer.from('pre-existing object');
+    objects.set(path, { bytes: existingBytes, type: 'image/png' });
+
+    const response = await request(app).post('/api/scans/scan-test/photo').set('Authorization', 'Bearer owner-token')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+
+    assert.equal(response.status, 502);
+    assert.deepEqual(uploadModes, [false]);
+    assert.deepEqual(objects.get(path), { bytes: existingBytes, type: 'image/png' });
+    assert.deepEqual(records.get('owner:scan-test'), {});
+    assert.deepEqual(removedPaths, []);
   });
 
   it('rejects missing/invalid auth and isolates another Firebase UID', async () => {
@@ -101,17 +141,115 @@ describe('protected crop photo storage API', () => {
 
   it('keeps the local-copy contract on Storage or Firestore failure and allows retry', async () => {
     let failSave = true;
-    const { app, removedPaths } = setup({
+    const { app, removedPaths, objects } = setup({
       savePhotoReference: async () => { if (failSave) throw new Error('Firestore temporarily unavailable.'); },
     });
     const first = await request(app).post('/api/scans/scan-test/photo').set('Authorization', 'Bearer owner-token')
       .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
     assert.equal(first.status, 503);
     assert.deepEqual(removedPaths, ['users/owner/scans/scan-test/photo']);
+    assert.equal(objects.has('users/owner/scans/scan-test/photo'), false);
     failSave = false;
     const retry = await request(app).post('/api/scans/scan-test/photo').set('Authorization', 'Bearer owner-token')
       .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
     assert.equal(retry.status, 200);
+  });
+
+  it('does not remove a path when upload did not confirm this request created it', async () => {
+    const path = 'users/owner/scans/scan-test/photo';
+    const existingBytes = Buffer.from('pre-existing object');
+    const { app, objects, removedPaths } = setup({
+      upload: async () => ({ created: false }),
+      savePhotoReference: async () => { throw new Error('Firestore temporarily unavailable.'); },
+    });
+    objects.set(path, { bytes: existingBytes, type: 'image/png' });
+
+    const response = await request(app).post('/api/scans/scan-test/photo').set('Authorization', 'Bearer owner-token')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+
+    assert.equal(response.status, 503);
+    assert.deepEqual(objects.get(path), { bytes: existingBytes, type: 'image/png' });
+    assert.deepEqual(removedPaths, []);
+  });
+
+  it('keeps the object and reports success if Firestore saved the reference before returning an error', async () => {
+    const path = 'users/owner/scans/scan-test/photo';
+    let reads = 0;
+    const { app, objects, removedPaths } = setup({
+      getPhotoRecord: async () => reads++ === 0 ? {} : { cloudPhotoPath: path },
+      savePhotoReference: async () => { throw new Error('Firestore response was lost after commit.'); },
+    });
+
+    const response = await request(app).post('/api/scans/scan-test/photo').set('Authorization', 'Bearer owner-token')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { cloudPhotoPath: path });
+    assert.equal(objects.has(path), true);
+    assert.deepEqual(removedPaths, []);
+  });
+
+  it('leaves a newly created object untouched when Firestore reference status cannot be verified', async () => {
+    const path = 'users/owner/scans/scan-test/photo';
+    let reads = 0;
+    const { app, objects, removedPaths } = setup({
+      getPhotoRecord: async () => {
+        if (reads++ === 0) return {};
+        throw new Error('Firestore read unavailable.');
+      },
+      savePhotoReference: async () => { throw new Error('Firestore write unavailable.'); },
+    });
+
+    const response = await request(app).post('/api/scans/scan-test/photo').set('Authorization', 'Bearer owner-token')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+
+    assert.equal(response.status, 503);
+    assert.equal(objects.has(path), true);
+    assert.deepEqual(removedPaths, []);
+  });
+
+  it('recovers the identical orphaned photo on retry after an unconfirmed Firestore link', async () => {
+    const path = 'users/owner/scans/scan-test/photo';
+    let unavailable = true;
+    let reads = 0;
+    const { app, objects, removedPaths } = setup({
+      getPhotoRecord: async () => {
+        if (unavailable && reads++ > 0) throw new Error('Firestore read unavailable');
+        return {};
+      },
+      savePhotoReference: async () => { if (unavailable) throw new Error('Firestore write unavailable'); },
+    });
+    const send = () => request(app).post('/api/scans/scan-test/photo').set('Authorization', 'Bearer owner-token')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+    assert.equal((await send()).status, 503);
+    assert.equal(objects.has(path), true);
+    unavailable = false;
+    const retry = await send();
+    assert.equal(retry.status, 200);
+    assert.equal(retry.body.cloudPhotoPath, path);
+    assert.deepEqual(objects.get(path)?.bytes, png);
+    assert.deepEqual(removedPaths, []);
+  });
+
+  it('does not remove a newly created object when Firestore readback points to a different path', async () => {
+    const path = 'users/owner/scans/scan-test/photo';
+    const differentPath = 'users/owner/scans/another-scan/photo';
+    let reads = 0;
+    const { app, objects, uploadedPaths, uploadModes, removedPaths } = setup({
+      getPhotoRecord: async () => reads++ === 0 ? {} : { cloudPhotoPath: differentPath },
+      savePhotoReference: async () => { throw new Error('Firestore write response was lost.'); },
+    });
+
+    const response = await request(app).post('/api/scans/scan-test/photo').set('Authorization', 'Bearer owner-token')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+
+    assert.equal(response.status, 503);
+    assert.equal(response.body.error.code, 'PHOTO_REFERENCE_SAVE_FAILED');
+    assert.equal(reads, 2);
+    assert.deepEqual(uploadedPaths, [path]);
+    assert.deepEqual(uploadModes, [false]);
+    assert.equal(objects.has(path), true);
+    assert.deepEqual(removedPaths, []);
   });
 
   it('reports missing cloud objects and safely removes an owned photo', async () => {
@@ -152,7 +290,11 @@ describe('protected crop photo storage API', () => {
       getPhotoRecord: async (uid, id) => records.get(`${uid}:${id}`) ?? null,
       savePhotoReference: async (uid, id, path) => { records.set(`${uid}:${id}`, { cloudPhotoPath: path }); },
       clearPhotoReference: async (uid, id) => { records.set(`${uid}:${id}`, {}); },
-      upload: async (path, image) => { objects.set(path, Buffer.from(image)); },
+      upload: async (path, image, _type, options = { upsert: true }) => {
+        if (!options.upsert && objects.has(path)) throw new PhotoStorageError('request_rejected', 409);
+        objects.set(path, Buffer.from(image));
+        return { created: !options.upsert };
+      },
       download: async (path) => { const bytes = objects.get(path); return bytes ? { bytes, contentType: 'image/png' } : null; },
       remove: async (path) => { objects.delete(path); },
     };

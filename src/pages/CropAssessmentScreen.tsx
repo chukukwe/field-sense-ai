@@ -16,6 +16,9 @@ import { ScanImage } from '../components/common/ScanImage';
 import { useApp } from '../context/useApp';
 import { useAuth } from '../context/useAuth';
 import { getScanPhoto } from '../data/photoStore';
+import { getFirebaseCropPhoto } from '../data/firebasePhotoStore';
+import { getCloudCropPhoto, uploadCropPhoto } from '../data/photoApi';
+import { loadAssessmentPhoto } from '../data/loadAssessmentPhoto';
 import { AssessmentRequestError, requestCropAssessment } from '../data/assessmentApi';
 import { canRequestAssessmentRetry } from '../data/assessmentRetry';
 import { simpleConfidence, simpleLikelihood } from '../data/assessmentLanguage';
@@ -72,7 +75,7 @@ export const CropAssessmentScreen: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
-  const { scans, resetScanDraft, applyAssessment, markScanFailed } = useApp();
+  const { scans, resetScanDraft, applyAssessment, markScanFailed, markPhotoSynced } = useApp();
   const { user } = useAuth();
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
   const [audioProgress, setAudioProgress] = useState<number>(38);
@@ -129,10 +132,16 @@ export const CropAssessmentScreen: React.FC = () => {
     setIsRetrying(true);
     setRetryError('');
     applyAssessment(scan.id, undefined, 'processing', 'Your crop photo is being assessed.');
+    let image: Blob | undefined;
+    let idToken = '';
     try {
-      const image = await getScanPhoto(scan.photoStorageKey);
-      if (!image) throw new Error('The saved photo is not available on this device.');
-      const idToken = await user.getIdToken();
+      idToken = await user.getIdToken();
+      image = await loadAssessmentPhoto(scan, {
+        local: getScanPhoto,
+        cloud: (scanId) => getCloudCropPhoto({ scanId, idToken }),
+        firebase: (scanId, firebasePhotoPath) => getFirebaseCropPhoto({ scanId, firebasePhotoPath }),
+      });
+      if (!image) throw new Error('The saved photo is unavailable. Open Scan details to choose the original photo, then retry.');
       assessmentProgress.setPhase('uploading');
       const assessment = await requestCropAssessment({
         image,
@@ -149,7 +158,7 @@ export const CropAssessmentScreen: React.FC = () => {
       const message = error instanceof Error ? error.message : 'The assessment could not be completed. You can retry this scan.';
       setRetryError(message);
       if (error instanceof AssessmentRequestError && error.code === 'ALREADY_PROCESSING') {
-                applyAssessment(scan.id, undefined, 'processing', 'Your crop is still being checked. Its result will appear here when ready.');
+        applyAssessment(scan.id, undefined, 'processing', 'Your crop is still being checked. Its result will appear here when ready.');
         setIsRetrying(false);
         return;
       }
@@ -161,6 +170,11 @@ export const CropAssessmentScreen: React.FC = () => {
       assessmentProgress.stop();
       retryInFlightRef.current = false;
       setIsRetrying(false);
+      if (image && idToken && !scan.cloudPhotoPath && !scan.firebasePhotoPath) {
+        void uploadCropPhoto({ scanId: scan.id, image, idToken }).then((path) => markPhotoSynced(scan.id, path)).catch(() => {
+          // The local photo remains available for a manual sync from Scan details.
+        });
+      }
     }
   };
 
@@ -257,7 +271,7 @@ export const CropAssessmentScreen: React.FC = () => {
               </div>
               <p className="text-[10px] leading-relaxed text-[#A1A7A3]">{assessment.disclaimer}</p>
             </>}
-            {canStartOrRetry && !canViewSample && canRequestAssessmentRetry(scan, Boolean(user), false) && <button
+            {canStartOrRetry && canRequestAssessmentRetry(scan, Boolean(user), false) && <button
               onClick={() => void retryAssessment()}
               disabled={isRetrying}
               className="w-full bg-[#176B45] hover:bg-[#1eb968] disabled:opacity-60 text-white py-3 rounded-xl text-xs font-semibold cursor-pointer transition"
@@ -271,6 +285,7 @@ export const CropAssessmentScreen: React.FC = () => {
             {isRetrying && <AssessmentProgressIndicator progress={assessmentProgress.progress} message={assessmentProgress.message} />}
             {retryError && retryError !== scan.summary && <p role="alert" className="text-xs text-[#FFB4A8]">{retryError}</p>}
           </div>
+          <button type="button" onClick={() => navigate(`/scan/${scan.id}`)} className="rounded-xl bg-[#292C2A] py-3 text-xs font-semibold text-white transition hover:bg-[#343835]">Scan details</button>
           <div className="grid grid-cols-2 gap-2.5">
             <button
               onClick={handleScanAnother}

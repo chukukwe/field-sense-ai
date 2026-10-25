@@ -43,6 +43,7 @@ export interface AnalyzeDependencies {
     details: { customCropName?: string; observations: string },
   ) => Promise<'claimed' | 'processing' | 'complete' | 'missing'>;
   saveAssessment: (uid: string, scanId: string, assessment: CropAssessmentResult) => Promise<void>;
+  getAssessment?: (uid: string, scanId: string) => Promise<unknown>;
   failScan: (uid: string, scanId: string, publicMessage: string) => Promise<void>;
   assessImage: (image: Buffer, mimeType: string, cropType: string, observations: string, requestId: string) => Promise<unknown>;
   translateAssessment?: (assessment: CropAssessmentResult) => Promise<unknown>;
@@ -60,7 +61,7 @@ export interface PhotoStoreDependencies {
   getPhotoRecord: (uid: string, scanId: string) => Promise<PhotoRecord | null>;
   savePhotoReference: (uid: string, scanId: string, path: string) => Promise<void>;
   clearPhotoReference: (uid: string, scanId: string) => Promise<void>;
-  upload: (path: string, image: Buffer, contentType: string) => Promise<void>;
+  upload: (path: string, image: Buffer, contentType: string, options: { upsert: boolean }) => Promise<{ created: boolean }>;
   download: (path: string) => Promise<{ bytes: Buffer; contentType: string } | null>;
   remove: (path: string) => Promise<void>;
 }
@@ -115,6 +116,31 @@ async function prepareAssessmentImage(image: Buffer, mimeType: string) {
 
 function sendError(res: express.Response, status: number, code: string, message: string, retryable = false) {
   return res.status(status).json({ error: { code, message, retryable } });
+}
+
+// These failures concern the server's ability to verify an account, rather
+// than the validity of the farmer's token. Never log raw SDK messages or tokens.
+const AUTH_SERVICE_ERROR_CODES = new Set([
+  'auth/insufficient-permission', 'auth/invalid-credential', 'auth/internal-error',
+  'auth/project-not-found', 'auth/quota-exceeded', 'auth/operation-not-allowed',
+  'app/invalid-credential', 'app/invalid-app-options', 'app/no-app', 'app/internal-error',
+  'app/network-error', 'app/network-timeout', 'app/unable-to-parse-response',
+  'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'ENETUNREACH',
+  'EHOSTUNREACH', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT',
+]);
+
+function sendAuthenticationError(res: express.Response, error: unknown) {
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && typeof current === 'object' && current !== null; depth += 1) {
+    const item = current as { code?: unknown; cause?: unknown };
+    if (typeof item.code === 'string' && AUTH_SERVICE_ERROR_CODES.has(item.code)) {
+      console.warn(JSON.stringify({ event: 'firebase_auth_unavailable', code: item.code }));
+      return sendError(res, 503, 'AUTH_SERVICE_UNAVAILABLE',
+        'We could not check your sign-in right now. Please try again later. If this continues, contact support.', true);
+    }
+    current = item.cause;
+  }
+  return sendError(res, 401, 'AUTH_INVALID', 'Your sign-in has expired or is invalid. Sign in again to continue.');
 }
 
 function logAssessmentEvent(
@@ -173,7 +199,7 @@ export function createApp(deps: AnalyzeDependencies) {
   const maxImageMb = Math.floor(maxImageBytes / (1024 * 1024));
   const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: maxImageBytes, files: 1, fields: 3, parts: 4 },
+    limits: { fileSize: maxImageBytes, files: 1, fields: 4, parts: 5 },
   });
   app.disable('x-powered-by');
   app.use(helmet());
@@ -194,7 +220,7 @@ export function createApp(deps: AnalyzeDependencies) {
         const tokenMatch = /^Bearer\s+(\S+)$/i.exec(req.header('authorization') ?? '');
         if (!tokenMatch) return sendError(res, 401, 'AUTH_REQUIRED', 'Sign in again to translate this result.');
         try { await deps.verifyIdToken(tokenMatch[1]!); }
-        catch { return sendError(res, 401, 'AUTH_INVALID', 'Your sign-in has expired. Sign in again to continue.'); }
+        catch (error) { return sendAuthenticationError(res, error); }
         if (!deps.translateAssessment) return sendError(res, 503, 'TRANSLATION_NOT_CONFIGURED', 'Pidgin translation is not available right now. Your English result is still available.', true);
         const parsed = assessmentSchema.safeParse((req.body as {assessment?: unknown} | undefined)?.assessment);
         if (!parsed.success) return sendError(res, 400, 'ASSESSMENT_INVALID', 'The saved assessment could not be checked.');
@@ -209,6 +235,16 @@ export function createApp(deps: AnalyzeDependencies) {
       })().catch(() => sendError(res, 500, 'INTERNAL_ERROR', 'The request could not be completed.'));
     });
   });
+  const readSavedAssessment = async (uid: string, scanId: string): Promise<CropAssessmentResult | undefined> => {
+    if (!deps.getAssessment) return undefined;
+    try {
+      const saved = assessmentSchema.safeParse(await deps.getAssessment(uid, scanId));
+      return saved.success ? saved.data : undefined;
+    } catch (error) {
+      logFirestoreFailure('read_assessment', error);
+      return undefined;
+    }
+  };
   const photoStore = deps.photoStore;
   if (photoStore) {
     const photoLimiter = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false, keyGenerator: rateLimitClientKey });
@@ -216,8 +252,8 @@ export function createApp(deps: AnalyzeDependencies) {
 
     app.post('/api/scans/:scanId/photo', (req, res) => {
       void (async () => {
-        const uid = await authenticatedUid(req, deps);
-        if (!uid) return sendError(res, 401, 'AUTH_REQUIRED', 'Sign in again before saving a crop photo.');
+        const uid = await authenticatedUid(req, res, deps, 'Sign in again before saving a crop photo.');
+        if (!uid) return;
         const scanIdResult = scanIdSchema.safeParse(req.params.scanId);
         if (!scanIdResult.success) return sendError(res, 400, 'INVALID_SCAN_ID', 'A valid scan ID is required.');
         upload.single('image')(req, res, (uploadError?: unknown) => {
@@ -245,30 +281,56 @@ export function createApp(deps: AnalyzeDependencies) {
             if (!priorRecord) return sendError(res, 404, 'SCAN_NOT_FOUND', 'This scan is not available in your account.');
             const path = priorRecord.cloudPhotoPath ?? `users/${uid}/scans/${scanId}/photo`;
             if (!isOwnedPhotoPath(path, uid, scanId)) return sendError(res, 403, 'PHOTO_PATH_INVALID', 'This photo reference is not available to your account.');
+            let uploadResult: { created: boolean };
             try {
-              await photoStore.upload(path, file.buffer, verified.mime);
+              uploadResult = await photoStore.upload(path, file.buffer, verified.mime, {
+                upsert: Boolean(priorRecord.cloudPhotoPath),
+              });
             } catch (error) {
-              return sendPhotoStorageError(res, error, 'upload');
+              // A prior create may have succeeded while its Firestore link could
+              // not be confirmed. Recover only the identical owner-scoped bytes;
+              // never overwrite an unlinked object with a different photo.
+              let samePhoto = false;
+              if (!priorRecord.cloudPhotoPath && error instanceof PhotoStorageError
+                && error.category === 'request_rejected' && [400, 409].includes(error.httpStatus ?? 0)) {
+                try {
+                  const existing = await photoStore.download(path);
+                  samePhoto = Boolean(existing && existing.bytes.equals(file.buffer)
+                    && existing.contentType.split(';')[0]?.trim().toLowerCase() === verified.mime);
+                } catch { /* retain the original safe upload failure */ }
+              }
+              if (!samePhoto) return sendPhotoStorageError(res, error, 'upload');
+              uploadResult = { created: false };
             }
             try {
               await photoStore.savePhotoReference(uid, scanId, path);
               return res.status(200).json({ cloudPhotoPath: path });
             } catch {
-              if (!priorRecord.cloudPhotoPath) await photoStore.remove(path).catch(() => {
-                console.warn('Private photo cleanup failed; category=storage_delete.');
-              });
+              let currentRecord: PhotoRecord | null | undefined;
+              try { currentRecord = await photoStore.getPhotoRecord(uid, scanId); }
+              catch {
+                console.warn('Private photo reference status is unknown; category=firestore_read; rollback=skipped.');
+              }
+              if (currentRecord?.cloudPhotoPath === path) return res.status(200).json({ cloudPhotoPath: path });
+              if (uploadResult.created && currentRecord !== undefined && !currentRecord?.cloudPhotoPath) {
+                await photoStore.remove(path).catch(() => {
+                  console.warn('Private photo cleanup failed; category=storage_delete.');
+                });
+              } else if (uploadResult.created) {
+                console.warn('Private photo rollback skipped; category=photo_ownership_unconfirmed.');
+              }
               console.warn('Private photo reference could not be saved; category=firestore_update.');
               return sendError(res, 503, 'PHOTO_REFERENCE_SAVE_FAILED', 'The photo could not be linked to the scan. Your local copy is still available; retry the upload.', true);
             } finally { req.file = undefined; }
           })().catch(() => sendError(res, 500, 'INTERNAL_ERROR', 'The photo upload could not be completed.'));
         });
-      })().catch(() => sendError(res, 401, 'AUTH_INVALID', 'Your sign-in has expired. Sign in again to continue.'));
+      })().catch(() => sendError(res, 500, 'INTERNAL_ERROR', 'The photo upload could not be completed.'));
     });
 
     app.get('/api/scans/:scanId/photo', (req, res) => {
       void (async () => {
-        const uid = await authenticatedUid(req, deps);
-        if (!uid) return sendError(res, 401, 'AUTH_REQUIRED', 'Sign in again to view this crop photo.');
+        const uid = await authenticatedUid(req, res, deps, 'Sign in again to view this crop photo.');
+        if (!uid) return;
         const scanIdResult = scanIdSchema.safeParse(req.params.scanId);
         if (!scanIdResult.success) return sendError(res, 400, 'INVALID_SCAN_ID', 'A valid scan ID is required.');
         const scanId = scanIdResult.data;
@@ -292,8 +354,8 @@ export function createApp(deps: AnalyzeDependencies) {
 
     app.delete('/api/scans/:scanId/photo', (req, res) => {
       void (async () => {
-        const uid = await authenticatedUid(req, deps);
-        if (!uid) return sendError(res, 401, 'AUTH_REQUIRED', 'Sign in again before deleting this crop photo.');
+        const uid = await authenticatedUid(req, res, deps, 'Sign in again before deleting this crop photo.');
+        if (!uid) return;
         const scanIdResult = scanIdSchema.safeParse(req.params.scanId);
         if (!scanIdResult.success) return sendError(res, 400, 'INVALID_SCAN_ID', 'A valid scan ID is required.');
         const scanId = scanIdResult.data;
@@ -377,7 +439,11 @@ export function createApp(deps: AnalyzeDependencies) {
               return sendError(res, 503, 'SCAN_UNAVAILABLE', 'The scan could not be saved to your account. Check your connection and try again.', true);
             }
             if (claim === 'missing') return sendError(res, 404, 'SCAN_NOT_FOUND', 'This scan does not match a scan in your account.');
-            if (claim === 'complete') return sendError(res, 409, 'ALREADY_ASSESSED', 'This scan already has an assessment.');
+            if (claim === 'complete') {
+              const saved = await readSavedAssessment(uid, scanId);
+              if (saved) return res.status(200).json({ assessment: saved });
+              return sendError(res, 409, 'ALREADY_ASSESSED', 'This scan already has an assessment.');
+            }
             if (claim === 'processing') return sendError(res, 409, 'ALREADY_PROCESSING', 'This scan is already being assessed.');
             const providerStartedAt = performance.now();
             logAssessmentEvent('info', 'assessment_started', requestId, {
@@ -393,6 +459,10 @@ export function createApp(deps: AnalyzeDependencies) {
               try {
                 await deps.saveAssessment(uid, scanId, parsed.data);
               } catch (error) {
+                // Firestore may commit before its acknowledgement is lost. A
+                // validated readback keeps that completed result authoritative.
+                const saved = await readSavedAssessment(uid, scanId);
+                if (saved) return res.status(200).json({ assessment: saved });
                 logFirestoreFailure('save_assessment', error);
                 logAssessmentEvent('warn', 'assessment_failed', requestId, {
                   failureCategory: 'ASSESSMENT_SAVE_FAILED',
@@ -432,7 +502,7 @@ export function createApp(deps: AnalyzeDependencies) {
           }
         })().catch(() => sendError(res, 500, 'INTERNAL_ERROR', 'The request could not be completed.'));
       });
-    }).catch(() => sendError(res, 401, 'AUTH_INVALID', 'Your sign-in has expired. Sign in again to continue.'));
+    }).catch((error: unknown) => sendAuthenticationError(res, error));
   });
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -446,10 +516,16 @@ export function createApp(deps: AnalyzeDependencies) {
   return app;
 }
 
-async function authenticatedUid(req: express.Request, deps: AnalyzeDependencies): Promise<string | null> {
+async function authenticatedUid(
+  req: express.Request, res: express.Response, deps: AnalyzeDependencies, missingMessage: string,
+): Promise<string | null> {
   const tokenMatch = /^Bearer\s+(\S+)$/i.exec(req.header('authorization') ?? '');
-  if (!tokenMatch) return null;
-  try { return (await deps.verifyIdToken(tokenMatch[1]!)).uid; } catch { return null; }
+  if (!tokenMatch) {
+    sendError(res, 401, 'AUTH_REQUIRED', missingMessage);
+    return null;
+  }
+  try { return (await deps.verifyIdToken(tokenMatch[1]!)).uid; }
+  catch (error) { sendAuthenticationError(res, error); return null; }
 }
 
 function isOwnedPhotoPath(path: string, uid: string, scanId: string): boolean {

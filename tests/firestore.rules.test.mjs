@@ -8,6 +8,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   serverTimestamp,
@@ -141,8 +142,13 @@ test('scan metadata validation, path binding, and owner isolation remain enforce
   await assertFails(setDoc(ref, scan({ fabricatedDiagnosis: 'blight' })));
   await assertFails(setDoc(ref, scan({ assessmentStatus: 'complete' })));
   await assertFails(setDoc(ref, scan({ cloudPhotoPath: 'users/farmer-b/scans/scan-1/photo' })));
+  await assertFails(setDoc(ref, scan({ firebasePhotoPath: 'users/farmer-b/scans/scan-1/crop-photo' })));
 
   await assertSucceeds(setDoc(ref, scan({ cloudPhotoPath: 'users/farmer-a/scans/scan-1/photo' })));
+  await assertSucceeds(setDoc(doc(ownerDb, 'users', 'farmer-a', 'scans', 'scan-2'), scan({
+    firebasePhotoPath: 'users/farmer-a/scans/scan-2/crop-photo',
+    photoScope: 'cloud',
+  })));
   const otherDb = testEnv.authenticatedContext('farmer-b').firestore();
   const otherRef = doc(otherDb, 'users', 'farmer-a', 'scans', 'scan-1');
   await assertDeniedWithoutRuleEvaluationError(getDoc(otherRef), 'cross-user scan read');
@@ -154,6 +160,46 @@ test('scan metadata validation, path binding, and owner isolation remain enforce
   await assertDeniedWithoutRuleEvaluationError(getDoc(anonymousRef), 'unauthenticated scan read');
   await assertDeniedWithoutRuleEvaluationError(setDoc(anonymousRef, scan()), 'unauthenticated scan write');
   await assertDeniedWithoutRuleEvaluationError(deleteDoc(anonymousRef), 'unauthenticated scan deletion');
+});
+
+test('photo-reference updates are narrowly scoped and preserve legacy Supabase paths', async () => {
+  const ownerDb = testEnv.authenticatedContext('farmer-a').firestore();
+  const ref = doc(ownerDb, 'users', 'farmer-a', 'scans', 'scan-link');
+  const legacyPath = 'users/farmer-a/scans/scan-link/photo';
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'users', 'farmer-a', 'scans', 'scan-link'), {
+      ...scan({ cloudPhotoPath: legacyPath, photoScope: 'cloud' }),
+      assessment: { status: 'completed', summary: 'Server-owned result' },
+      processingStartedAt: new Date(),
+    });
+  });
+
+  const firebasePath = 'users/farmer-a/scans/scan-link/crop-photo';
+  await assertSucceeds(updateDoc(ref, {
+    firebasePhotoPath: firebasePath,
+    photoScope: 'cloud',
+    updatedAt: serverTimestamp(),
+  }));
+  let data = (await assertSucceeds(getDoc(ref))).data();
+  assert.equal(data?.firebasePhotoPath, firebasePath);
+  assert.equal(data?.cloudPhotoPath, legacyPath);
+
+  await assertFails(updateDoc(ref, {
+    firebasePhotoPath: 'users/farmer-a/scans/other-scan/crop-photo',
+    photoScope: 'cloud',
+    updatedAt: serverTimestamp(),
+  }));
+  await assertFails(updateDoc(ref, { summary: 'A photo-link update cannot edit diagnosis data.', updatedAt: serverTimestamp() }));
+
+  await assertSucceeds(updateDoc(ref, {
+    firebasePhotoPath: deleteField(),
+    photoScope: 'cloud',
+    updatedAt: serverTimestamp(),
+  }));
+  data = (await assertSucceeds(getDoc(ref))).data();
+  assert.equal(data?.firebasePhotoPath, undefined);
+  assert.equal(data?.cloudPhotoPath, legacyPath);
 });
 
 test('custom crop names are bounded, belong only to Other scans, and remain owner-scoped', async () => {

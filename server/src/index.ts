@@ -114,6 +114,10 @@ const app = createApp({
       updatedAt: FieldValue.serverTimestamp(),
     });
   },
+  getAssessment: async (uid, scanId) => {
+    const snapshot = await db.doc(`users/${uid}/scans/${scanId}`).get();
+    return snapshot.data()?.assessment;
+  },
   failScan: async (uid, scanId, publicMessage) => {
     await db.doc(`users/${uid}/scans/${scanId}`).update({
       assessmentStatus: 'failed',

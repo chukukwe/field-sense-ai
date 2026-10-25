@@ -254,7 +254,7 @@ export async function translateAssessmentToPidgin(assessment: CropAssessmentResu
       summary: translated.summary,
       confidenceReason: translated.confidenceReason,
       observedSymptoms: translated.observedSymptoms as string[],
-      possibleCauses: (translated.possibleCauses as Array<{name:string;explanation:string}>).map((cause, index) => ({ ...assessment.possibleCauses[index]!, ...cause })),
+      possibleCauses: (translated.possibleCauses as Array<{ name: string; explanation: string }>).map((cause, index) => ({ ...assessment.possibleCauses[index]!, ...cause })),
       recommendedActions: translated.recommendedActions as string[],
       preventionTips: translated.preventionTips as string[],
       whenToSeekHelp: translated.whenToSeekHelp,
@@ -265,7 +265,7 @@ export async function translateAssessmentToPidgin(assessment: CropAssessmentResu
     return translatedResult;
   } catch (error) {
     if (error instanceof ProviderError) throw error;
-    const status = typeof error === 'object' && error !== null && 'status' in error ? Number((error as {status: unknown}).status) : 0;
+    const status = typeof error === 'object' && error !== null && 'status' in error ? Number((error as { status: unknown }).status) : 0;
     if (status === 429) throw new ProviderError('GEMINI_QUOTA', 429, 'Pidgin translation is busy. Your English result is still available.');
     throw new ProviderError('TRANSLATION_UNAVAILABLE', 502, 'Pidgin translation could not be loaded. Your English result is still available.');
   }
@@ -298,17 +298,19 @@ export async function assessWithGemini(
     phase: 'generate_content',
     imageMimeType: mimeType,
     imageBytes: image.byteLength,
-    timeoutMs: 180_000,
+    timeoutMs: 200_000,
     attemptLimit: 1,
     thinkingLevel: 'low',
   }));
   let response;
   try {
-    const ai = new GoogleGenAI({ apiKey, httpOptions: {
-      timeout: 180_000,
-      retryOptions: { attempts: 1 },
-      fetch: createDiagnosticFetch(fetchImpl, requestId, model),
-    } });
+    const ai = new GoogleGenAI({
+      apiKey, httpOptions: {
+        timeout: 200_000,
+        retryOptions: { attempts: 1 },
+        fetch: createDiagnosticFetch(fetchImpl, requestId, model),
+      }
+    });
     response = await ai.models.generateContent({
       model,
       contents: [{

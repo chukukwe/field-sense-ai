@@ -101,7 +101,7 @@ describe('Gemini failure diagnostics', () => {
     assert.equal(fetchCalls, 1, 'SDK attempt limit must prevent retrying the provider request');
     assert.equal(requestPath, '/v1beta/models/gemini-3.8-flash:generateContent');
     assert.equal(requestMethod, 'POST');
-    assert.equal(requestTimeoutHeader, '180');
+    assert.equal(requestTimeoutHeader, '200');
     assert.ok(requestPayload);
     const generationConfig = requestPayload.generationConfig as Record<string, unknown>;
     const thinkingConfig = generationConfig.thinkingConfig as Record<string, unknown>;
@@ -200,6 +200,83 @@ function setup(overrides: Partial<AnalyzeDependencies> = {}) {
 }
 
 const auth = { Authorization: 'Bearer valid-owner-token' };
+
+const authProtectedRoutes = [
+  { method: 'post', path: '/api/analyze-crop' },
+  { method: 'post', path: '/api/assessment/translate-pidgin' },
+  { method: 'post', path: '/api/scans/scan-test/photo' },
+  { method: 'get', path: '/api/scans/scan-test/photo' },
+  { method: 'delete', path: '/api/scans/scan-test/photo' },
+] as const;
+
+describe('authentication infrastructure failures', () => {
+  const unusedPhotoStore = {
+    getPhotoRecord: async () => { throw new Error('must not read account data'); },
+    savePhotoReference: async () => undefined, clearPhotoReference: async () => undefined,
+    upload: async () => ({ created: true }), download: async () => null, remove: async () => undefined,
+  };
+
+  it('reports Firebase permission failures consistently without blaming or exposing the token', async () => {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); };
+    let providerCalls = 0;
+    try {
+      const { app } = setup({
+        verifyIdToken: async () => { throw Object.assign(new Error('private Firebase credential detail'), { code: 'auth/insufficient-permission' }); },
+        photoStore: unusedPhotoStore,
+        assessImage: async () => { providerCalls += 1; return assessment; },
+      });
+      for (const route of authProtectedRoutes) {
+        const response = await request(app)[route.method](route.path).set(auth);
+        assert.equal(response.status, 503, route.path);
+        assert.equal(response.body.error.code, 'AUTH_SERVICE_UNAVAILABLE');
+        assert.equal(response.body.error.retryable, true);
+        assert.doesNotMatch(JSON.stringify(response.body), /private|valid-owner-token|expired|sign in again/i);
+      }
+      assert.equal(providerCalls, 0);
+    } finally { console.warn = originalWarn; }
+    assert.equal(warnings.length, authProtectedRoutes.length);
+    assert.ok(warnings.every((line) => line === JSON.stringify({ event: 'firebase_auth_unavailable', code: 'auth/insufficient-permission' })));
+  });
+
+  it('keeps credential and network outages retryable while failing closed', async () => {
+    for (const code of ['auth/invalid-credential', 'app/network-error', 'app/network-timeout', 'ECONNRESET']) {
+      const { app } = setup({ verifyIdToken: async () => { throw Object.assign(new Error('private detail'), { code }); } });
+      const response = await request(app).post('/api/analyze-crop').set(auth);
+      assert.equal(response.status, 503);
+      assert.equal(response.body.error.code, 'AUTH_SERVICE_UNAVAILABLE');
+      assert.equal(response.body.error.retryable, true);
+    }
+  });
+
+  it('continues rejecting invalid, expired and revoked tokens across protected routes', async () => {
+    for (const code of ['auth/invalid-id-token', 'auth/argument-error', 'auth/id-token-expired', 'auth/id-token-revoked', 'auth/user-disabled']) {
+      const { app } = setup({
+        verifyIdToken: async () => { throw Object.assign(new Error('invalid token'), { code }); },
+        photoStore: unusedPhotoStore,
+      });
+      for (const route of authProtectedRoutes) {
+        const response = await request(app)[route.method](route.path).set(auth);
+        assert.equal(response.status, 401, route.path);
+        assert.equal(response.body.error.code, 'AUTH_INVALID');
+        assert.equal(response.body.error.retryable, false);
+      }
+    }
+  });
+
+  it('requires a bearer token before checking service availability', async () => {
+    const { app } = setup({
+      verifyIdToken: async () => { throw Object.assign(new Error('private'), { code: 'auth/insufficient-permission' }); },
+      photoStore: unusedPhotoStore,
+    });
+    for (const route of authProtectedRoutes) {
+      const response = await request(app)[route.method](route.path);
+      assert.equal(response.status, 401, route.path);
+      assert.equal(response.body.error.code, 'AUTH_REQUIRED');
+    }
+  });
+});
 
 describe('rate-limit client identity', () => {
   it('keeps Express proxy trust disabled', () => {
@@ -315,6 +392,25 @@ describe('POST /api/analyze-crop', () => {
       .field('scanId', 'scan-test').field('cropType', 'Other').field('customCropName', '  Cocoyam  ')
       .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
     assert.equal(response.status, 200);
+  });
+
+  it('accepts every multipart field sent by the frontend for an Other crop', async () => {
+    let receivedCrop = '';
+    let receivedObservations = '';
+    const { app } = setup({
+      assessImage: async (_image, _mime, crop, observations) => {
+        receivedCrop = crop;
+        receivedObservations = observations;
+        return assessment;
+      },
+    });
+    const response = await request(app).post('/api/analyze-crop').set(auth)
+      .attach('image', png, { filename: 'crop-photo', contentType: 'image/png' })
+      .field('cropType', 'Other').field('customCropName', 'Yam')
+      .field('observations', 'Yellow leaves').field('scanId', 'scan-test');
+    assert.equal(response.status, 200);
+    assert.equal(receivedCrop, 'Yam');
+    assert.equal(receivedObservations, 'Yellow leaves');
   });
 
   it('rejects unsupported or malformed image bytes declared as PNG', async () => {
@@ -494,6 +590,49 @@ describe('POST /api/analyze-crop', () => {
       assert.equal(response.status, 409);
     }
     assert.equal(providerCalls, 0);
+  });
+
+  it('replays the validated saved result when a completed scan is retried', async () => {
+    let providerCalls = 0;
+    const { app, fails, persisted } = setup({
+      claimScan: async () => 'complete',
+      getAssessment: async (uid, scanId) => {
+        assert.equal(uid, 'owner');
+        assert.equal(scanId, 'scan-test');
+        return assessment;
+      },
+      assessImage: async () => { providerCalls += 1; return assessment; },
+    });
+    const response = await request(app).post('/api/analyze-crop').set(auth)
+      .field('scanId', 'scan-test').field('cropType', 'Cassava')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.assessment, assessment);
+    assert.equal(providerCalls, 0);
+    assert.deepEqual(fails, []);
+    assert.deepEqual(persisted, []);
+  });
+
+  it('does not replay an invalid saved assessment as success', async () => {
+    const { app } = setup({ claimScan: async () => 'complete', getAssessment: async () => ({ summary: 'incomplete' }) });
+    const response = await request(app).post('/api/analyze-crop').set(auth)
+      .field('scanId', 'scan-test').field('cropType', 'Cassava')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+    assert.equal(response.status, 409);
+    assert.equal(response.body.error.code, 'ALREADY_ASSESSED');
+  });
+
+  it('returns the committed result if only the Firestore save acknowledgement was lost', async () => {
+    const { app, fails } = setup({
+      saveAssessment: async () => { throw new Error('acknowledgement lost after commit'); },
+      getAssessment: async () => assessment,
+    });
+    const response = await request(app).post('/api/analyze-crop').set(auth)
+      .field('scanId', 'scan-test').field('cropType', 'Cassava')
+      .attach('image', png, { filename: 'crop.png', contentType: 'image/png' });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.assessment, assessment);
+    assert.deepEqual(fails, []);
   });
 
   it('rejects malformed model output and marks the scan failed', async () => {

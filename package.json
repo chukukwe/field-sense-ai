@@ -9,12 +9,13 @@
     "dev:all": "concurrently -k -n frontend,api \"npm run dev\" \"npm run server:dev\"",
     "server:build": "npm --prefix server run build",
     "server:test": "npm --prefix server test",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-fieldvoice-rules-test \"node --test tests/firestore.rules.test.mjs\"",
+    "test:rules": "firebase emulators:exec --only firestore,storage --project demo-fieldvoice-rules-test \"node --test tests/firestore.rules.test.mjs tests/storage.rules.test.mjs\"",
     "typecheck": "tsc -b && npm run server:build",
     "lint:server": "oxlint server/src server/tests",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:farmpal": "concurrently -k -n frontend,api \"vite --mode farmpal-dev\" \"npm --prefix server run dev:farmpal\""
   },
   "dependencies": {
     "firebase": "^13.1.0",

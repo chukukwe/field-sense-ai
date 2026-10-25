@@ -1,4 +1,4 @@
-import type { ScanItem } from '../types';
+import type { ScanItem } from '../types.js';
 
 function getScanCreatedTime(scan: ScanItem): number {
   const createdAt = (scan as ScanItem & { createdAt?: unknown }).createdAt;
@@ -19,7 +19,7 @@ function getScanCreatedTime(scan: ScanItem): number {
 
   // Locally-created scans use the creation time in their ID, which is more
   // precise than the display date and remains available for local-only scans.
-  const idTimestamp = scan.id.match(/^scan-(\d{10,})$/)?.[1];
+  const idTimestamp = scan.id.match(/^scan-(\d{10,})(?:-[0-9a-f-]+)?$/i)?.[1];
   if (idTimestamp) {
     const parsed = Number(idTimestamp);
     if (Number.isFinite(parsed)) return parsed;

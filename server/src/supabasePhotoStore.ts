@@ -52,13 +52,18 @@ async function classifyNotFound(response: Response): Promise<NotFoundCategory> {
 export function createSupabasePhotoStore(config: SupabasePhotoStoreConfig) {
   const root = projectRoot(config.url);
   const fetcher = config.fetcher ?? fetch;
+  // Existing installations may keep a legacy JWT in SUPABASE_SECRET_KEY, or
+  // migrate the value before renaming SUPABASE_SERVICE_ROLE_KEY. The actual
+  // credential format determines whether Storage also needs bearer auth.
+  const useLegacyBearer = !config.apiKey.startsWith('sb_')
+    && (config.legacyServiceRoleKey === true || /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(config.apiKey));
   const objectUrl = (path: string) => `${root}/storage/v1/object/${encodeURIComponent(config.bucket)}/${path.split('/').map(encodeURIComponent).join('/')}`;
   const headers = (extra?: HeadersInit) => {
     const result = new Headers(extra);
     result.set('apikey', config.apiKey);
     // New sb_secret keys belong only in apikey. Legacy service_role JWTs are also
     // sent as a bearer token so Supabase resolves the service_role authorization.
-    if (config.legacyServiceRoleKey) result.set('Authorization', `Bearer ${config.apiKey}`);
+    if (useLegacyBearer) result.set('Authorization', `Bearer ${config.apiKey}`);
     return result;
   };
   const request = async (url: string, init: RequestInit, operation: 'upload' | 'download' | 'delete') => {
@@ -74,6 +79,20 @@ export function createSupabasePhotoStore(config: SupabasePhotoStoreConfig) {
       if (category === 'object_missing' && (operation === 'download' || operation === 'delete')) return response;
       throw new PhotoStorageError(category, response.status);
     }
+    if (response.status === 400) {
+      // Storage can report a malformed key as HTTP 400 rather than 401.
+      // Inspect only recognized signals and never retain or log its payload.
+      const body: unknown = await response.clone().json().catch(() => null);
+      if (typeof body === 'object' && body !== null) {
+        const fields = body as Record<string, unknown>;
+        const code = typeof fields.code === 'string' ? fields.code : '';
+        const message = typeof fields.message === 'string' ? fields.message : '';
+        if (code === 'InvalidJWT'
+          || /jws protected header is invalid|invalid jwt|headers must have required property ['"]authorization['"]/i.test(message)) {
+          throw new PhotoStorageError('invalid_credentials', response.status);
+        }
+      }
+    }
     const category = response.status === 401 ? 'invalid_credentials'
       : response.status === 403 ? 'authorization'
         : response.status >= 500 ? 'upstream' : 'request_rejected';
@@ -81,8 +100,11 @@ export function createSupabasePhotoStore(config: SupabasePhotoStoreConfig) {
   };
 
   return {
-    async upload(path: string, image: Buffer, contentType: string): Promise<void> {
-      await request(objectUrl(path), { method: 'POST', headers: headers({ 'Content-Type': contentType, 'x-upsert': 'true', 'Cache-Control': 'private, max-age=0, no-store' }), body: new Uint8Array(image) }, 'upload');
+    async upload(path: string, image: Buffer, contentType: string, options: { upsert: boolean }): Promise<{ created: boolean }> {
+      await request(objectUrl(path), { method: 'POST', headers: headers({ 'Content-Type': contentType, 'x-upsert': String(options.upsert), 'Cache-Control': 'private, max-age=0, no-store' }), body: new Uint8Array(image) }, 'upload');
+      // A successful create-only request proves this call created the object.
+      // Upsert requests may replace an existing object, so they are never rollback candidates.
+      return { created: !options.upsert };
     },
     async download(path: string): Promise<{ bytes: Buffer; contentType: string } | null> {
       const response = await request(objectUrl(path), { headers: headers(), cache: 'no-store' }, 'download');

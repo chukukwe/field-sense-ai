@@ -22,7 +22,7 @@ service cloud.firestore {
       return data.keys().hasOnly([
         'title', 'cropType', 'customCropName', 'date', 'status', 'statusVariant', 'summary',
         'footerIcon', 'footerStatus', 'footerActionLabel', 'imageUrl',
-        'cloudPhotoPath', 'photoStorageKey', 'photoScope', 'dataScope', 'assessmentStatus', 'imageSizeMb',
+        'cloudPhotoPath', 'firebasePhotoPath', 'photoStorageKey', 'photoScope', 'dataScope', 'assessmentStatus', 'imageSizeMb',
         'userObservations', 'updatedAt'
       ])
       && data.title is string
@@ -46,10 +46,27 @@ service cloud.firestore {
       && data.updatedAt is timestamp
       && data.imageUrl is string
       && (!('cloudPhotoPath' in data) || data.cloudPhotoPath is string)
+      && (!('firebasePhotoPath' in data) || data.firebasePhotoPath is string)
       && (!('photoStorageKey' in data) || data.photoStorageKey is string)
       && (!('photoScope' in data) || data.photoScope in ['cloud', 'local-only', 'missing'])
       && (!('imageSizeMb' in data) || data.imageSizeMb is number)
       && (!('userObservations' in data) || data.userObservations is string);
+    }
+
+    function validPhotoReferenceUpdate(uid, scanId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let hasFirebasePhoto = 'firebasePhotoPath' in request.resource.data;
+      let hasLegacyPhoto = 'cloudPhotoPath' in request.resource.data;
+      return changed.hasOnly([
+          'firebasePhotoPath', 'cloudPhotoPath', 'photoStorageKey', 'photoScope', 'updatedAt'
+        ])
+        && request.resource.data.updatedAt == request.time
+        && (!hasFirebasePhoto
+          || request.resource.data.firebasePhotoPath == 'users/' + uid + '/scans/' + scanId + '/crop-photo')
+        && (!hasLegacyPhoto
+          || request.resource.data.cloudPhotoPath == 'users/' + uid + '/scans/' + scanId + '/photo')
+        && (!('photoStorageKey' in request.resource.data) || request.resource.data.photoStorageKey is string)
+        && request.resource.data.photoScope == (hasFirebasePhoto || hasLegacyPhoto ? 'cloud' : 'local-only');
     }
 
     match /users/{uid} {
@@ -64,7 +81,10 @@ service cloud.firestore {
         allow read: if signedInAs(uid);
         allow create, update: if signedInAs(uid) && validScan(request.resource.data)
           && (!('cloudPhotoPath' in request.resource.data)
-            || request.resource.data.cloudPhotoPath == 'users/' + uid + '/scans/' + scanId + '/photo');
+            || request.resource.data.cloudPhotoPath == 'users/' + uid + '/scans/' + scanId + '/photo')
+          && (!('firebasePhotoPath' in request.resource.data)
+            || request.resource.data.firebasePhotoPath == 'users/' + uid + '/scans/' + scanId + '/crop-photo');
+        allow update: if signedInAs(uid) && validPhotoReferenceUpdate(uid, scanId);
         allow delete: if signedInAs(uid);
       }
     }

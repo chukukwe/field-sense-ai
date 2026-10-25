@@ -1,0 +1,24 @@
+[
+  {
+    "origin": [
+      "https://field-sense-ai.netlify.app",
+      "http://localhost:5173",
+      "http://127.0.0.1:5173"
+    ],
+    "method": ["GET", "HEAD", "POST", "PUT", "DELETE"],
+    "responseHeader": [
+      "Content-Type",
+      "Authorization",
+      "X-Firebase-GMPID",
+      "X-Goog-Upload-Protocol",
+      "X-Goog-Upload-Command",
+      "X-Goog-Upload-URL",
+      "X-Goog-Upload-Offset",
+      "X-Goog-Upload-Header-Content-Type",
+      "X-Goog-Upload-Header-Content-Length",
+      "X-Goog-Upload-Status",
+      "X-Goog-Upload-Size-Received"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

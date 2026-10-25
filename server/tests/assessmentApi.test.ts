@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { AssessmentRequestError, requestCropAssessment } from '../../src/data/assessmentApi.js';
+import { AssessmentRequestError, requestCropAssessment, ASSESSMENT_REQUEST_TIMEOUT_MS } from '../../src/data/assessmentApi.js';
 import { canRequestAssessmentRetry } from '../../src/data/assessmentRetry.js';
 import { advanceEstimatedProgress, getAssessmentProgressMessage } from '../../src/data/assessmentProgress.js';
-import type { CropAssessment } from '../../src/types.js';
+import type { CropAssessment, ScanItem } from '../../src/types.js';
+import { updateScanAssessment } from '../../src/data/assessmentState.js';
 import { translateAssessmentToPidgin } from '../../src/data/pidginTranslationApi.js';
 import { canOfferSampleCropResult, getSampleCropResult } from '../../src/data/sampleCropResults.js';
 import { getSeasonGuideEntry, seasonGuideAreas, type SeasonGuidePeriod } from '../../src/data/seasonGuide.js';
@@ -54,6 +55,8 @@ describe('frontend assessment API helper', () => {
   it('allows an authenticated local-only scan with its saved photo to be retried', () => {
     const localOnlyScan = { photoStorageKey: 'owner/scan-test', dataScope: 'local-only' };
     assert.equal(canRequestAssessmentRetry(localOnlyScan, true, false), true);
+    assert.equal(canRequestAssessmentRetry({ firebasePhotoPath: 'users/owner/scans/scan-remote/crop-photo' }, true, false), true);
+    assert.equal(canRequestAssessmentRetry({ cloudPhotoPath: 'users/owner/scans/scan-legacy/photo' }, true, false), true);
     assert.equal(canRequestAssessmentRetry(localOnlyScan, false, false), false);
     assert.equal(canRequestAssessmentRetry(localOnlyScan, true, true), false);
     assert.equal(canRequestAssessmentRetry({ dataScope: 'local-only' }, true, false), false);
@@ -72,6 +75,55 @@ describe('frontend assessment API helper', () => {
     assert.equal(new Headers(sentInit?.headers).get('authorization'), 'Bearer test-token');
     assert.equal(new Headers(sentInit?.headers).has('content-type'), false);
     assert.ok(sentInit?.body instanceof FormData);
+  });
+
+  it('stops a hung upload at the request deadline and aborts its connection', async (context) => {
+    context.mock.timers.enable({ apis: ['setTimeout'] });
+    let signal: AbortSignal | null | undefined;
+    const pending = requestCropAssessment(input, async (_url, init) => {
+      signal = init?.signal;
+      return new Promise<Response>(() => {});
+    });
+    const rejected = assert.rejects(pending, (error: unknown) => error instanceof AssessmentRequestError
+      && error.code === 'ASSESSMENT_TIMEOUT' && error.status === 408 && error.retryable);
+    context.mock.timers.tick(ASSESSMENT_REQUEST_TIMEOUT_MS);
+    await rejected;
+    assert.equal(signal?.aborted, true);
+  });
+
+  it('also bounds a response whose body never finishes', async (context) => {
+    context.mock.timers.enable({ apis: ['setTimeout'] });
+    const pending = requestCropAssessment(input, async () => new Response(new ReadableStream({ start() {} })));
+    const rejected = assert.rejects(pending, (error: unknown) => error instanceof AssessmentRequestError
+      && error.code === 'ASSESSMENT_TIMEOUT');
+    await Promise.resolve();
+    context.mock.timers.tick(ASSESSMENT_REQUEST_TIMEOUT_MS);
+    await rejected;
+  });
+
+  it('clears the request timer after a successful response', async (context) => {
+    context.mock.timers.enable({ apis: ['setTimeout'] });
+    let signal: AbortSignal | null | undefined;
+    await requestCropAssessment(input, async (_url, init) => {
+      signal = init?.signal;
+      return Response.json({ assessment: result });
+    });
+    context.mock.timers.tick(ASSESSMENT_REQUEST_TIMEOUT_MS);
+    assert.equal(signal?.aborted, false);
+  });
+
+  it('preserves a cloud result when a late HTTP timeout or retry update arrives', () => {
+    const saved: ScanItem = {
+      id: 'scan-completed', title: 'Cassava', cropType: 'Cassava', date: '24 Oct 2026',
+      status: 'Observation', statusVariant: 'amber', summary: result.summary,
+      footerIcon: 'check', footerStatus: 'Crop check ready', footerActionLabel: 'See result',
+      imageUrl: '', assessment: result, assessmentStatus: result.status,
+    };
+    assert.equal(updateScanAssessment(saved, undefined, 'failed', 'Timed out'), saved);
+    assert.equal(updateScanAssessment(saved, undefined, 'processing', 'Checking'), saved);
+    const pending = { ...saved, assessment: undefined, assessmentStatus: 'pending' as const };
+    assert.equal(updateScanAssessment(pending, undefined, 'failed', 'Timed out').assessmentStatus, 'failed');
+    assert.equal(updateScanAssessment(pending, result, result.status, result.summary).assessment, result);
   });
 
   it('returns a clear retryable failure and never treats an error as an assessment', async () => {

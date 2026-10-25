@@ -19,11 +19,14 @@ import { cropOptions, validateCropSelection } from '../data/cropFamilies';
 export const ScanScreen: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { scanDraft, setScanDraft, resetScanDraft } = useApp();
+  const { scans, scanDraft, setScanDraft, resetScanDraft } = useApp();
 
-  const [errorBanner, setErrorBanner] = useState<'crop-required' | 'custom-name-required' | 'custom-name-invalid' | 'no-photo' | 'too-large' | 'not-image' | null>(null);
+  const [errorBanner, setErrorBanner] = useState<'crop-required' | 'custom-name-required' | 'custom-name-invalid' | 'no-photo' | 'too-large' | 'not-image' | 'unreadable-image' | null>(null);
   const [cameraBlocked, setCameraBlocked] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [isPreparingPhoto, setIsPreparingPhoto] = useState(false);
+  const [cameraPending, setCameraPending] = useState(false);
+  const [voiceMessage, setVoiceMessage] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
 
@@ -31,6 +34,28 @@ export const ScanScreen: React.FC = () => {
   const cameraVideoRef = useRef<HTMLVideoElement>(null);
   const recognitionRef = useRef<any>(null);
   const scanSubmissionStartedRef = useRef(false);
+  const mountedRef = useRef(false);
+  const photoRequestRef = useRef(0);
+  const cameraRequestRef = useRef(0);
+  const cameraPendingRef = useRef(false);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      photoRequestRef.current += 1;
+      cameraRequestRef.current += 1;
+      cameraPendingRef.current = false;
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+      if (recognitionRef.current) {
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.abort();
+      }
+    };
+  }, []);
 
   /* Start voice recognition from FAB */
   useEffect(() => {
@@ -39,72 +64,141 @@ export const ScanScreen: React.FC = () => {
   }, []);
 
   /* ── Handlers ── */
-  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = ''; // allow re-selecting same file
+  const revokeUnsavedPreview = (url: string | null) => {
+    if (url?.startsWith('blob:') && !scans.some((scan) => scan.imageUrl === url)) URL.revokeObjectURL(url);
+  };
 
+  const acceptPhoto = async (file: File) => {
+    const requestId = ++photoRequestRef.current;
+    setIsPreparingPhoto(false);
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
       setErrorBanner('not-image');
       return;
     }
-    const sizeMb = Number((file.size / (1024 * 1024)).toFixed(1));
     if (file.size > 8 * 1024 * 1024) {
       setErrorBanner('too-large');
       return;
     }
-    setErrorBanner(null);
-    setCameraBlocked(false);
+    if (!file.size) {
+      setErrorBanner('unreadable-image');
+      return;
+    }
+    setIsPreparingPhoto(true);
     const url = URL.createObjectURL(file);
-    setScanDraft((prev) => ({ ...prev, photoFile: file, photoPreviewUrl: url, photoSizeMb: sizeMb }));
+    try {
+      // Decode before accepting the photo: a filename or MIME label alone does
+      // not prove that the browser can display the selected bytes.
+      if (typeof createImageBitmap === 'function') {
+        const bitmap = await createImageBitmap(file);
+        if (!bitmap.width || !bitmap.height) { bitmap.close(); throw new Error('Empty image'); }
+        bitmap.close();
+      } else {
+        await new Promise<void>((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => image.naturalWidth && image.naturalHeight ? resolve() : reject(new Error('Empty image'));
+          image.onerror = () => reject(new Error('Unreadable image'));
+          image.src = url;
+        });
+      }
+      if (!mountedRef.current || requestId !== photoRequestRef.current) { URL.revokeObjectURL(url); return; }
+      revokeUnsavedPreview(scanDraft.photoPreviewUrl);
+      setScanDraft((prev) => ({ ...prev, photoFile: file, photoPreviewUrl: url, photoSizeMb: Number((file.size / (1024 * 1024)).toFixed(1)) }));
+      cameraRequestRef.current += 1;
+      cameraPendingRef.current = false;
+      setCameraPending(false);
+      closeCamera();
+      setErrorBanner(null);
+      setCameraBlocked(false);
+    } catch {
+      URL.revokeObjectURL(url);
+      if (mountedRef.current && requestId === photoRequestRef.current) setErrorBanner('unreadable-image');
+    } finally {
+      if (mountedRef.current && requestId === photoRequestRef.current) setIsPreparingPhoto(false);
+    }
   };
 
-  const removePhoto = () =>
+  const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) void acceptPhoto(file);
+  };
+
+  const removePhoto = () => {
+    photoRequestRef.current += 1;
+    setIsPreparingPhoto(false);
+    revokeUnsavedPreview(scanDraft.photoPreviewUrl);
     setScanDraft((prev) => ({ ...prev, photoFile: null, photoPreviewUrl: null, photoSizeMb: 0 }));
+  };
+
+  const closeCamera = () => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+    setCameraStream(null);
+  };
+
+  const cancelCamera = () => {
+    photoRequestRef.current += 1;
+    setIsPreparingPhoto(false);
+    closeCamera();
+  };
 
   useEffect(() => {
     if (cameraVideoRef.current && cameraStream) {
       cameraVideoRef.current.srcObject = cameraStream;
-      void cameraVideoRef.current.play().catch(() => setCameraBlocked(true));
+      void cameraVideoRef.current.play().catch(() => {
+        if (mountedRef.current && cameraStreamRef.current === cameraStream) {
+          cameraStream.getTracks().forEach((track) => track.stop());
+          cameraStreamRef.current = null;
+          setCameraStream(null);
+          setCameraBlocked(true);
+        }
+      });
     }
     return () => cameraStream?.getTracks().forEach((track) => track.stop());
   }, [cameraStream]);
 
   const openCamera = async () => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraBlocked(true);
-      return;
-    }
+    if (cameraPendingRef.current) return;
+    if (!navigator.mediaDevices?.getUserMedia) { setCameraBlocked(true); return; }
+    const requestId = ++cameraRequestRef.current;
+    cameraPendingRef.current = true;
+    setCameraPending(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      if (!mountedRef.current || requestId !== cameraRequestRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = stream;
       setCameraBlocked(false);
       setCameraStream(stream);
     } catch {
-      setCameraStream(null);
-      setCameraBlocked(true);
+      if (mountedRef.current && requestId === cameraRequestRef.current) setCameraBlocked(true);
+    } finally {
+      if (mountedRef.current && requestId === cameraRequestRef.current) {
+        cameraPendingRef.current = false;
+        setCameraPending(false);
+      }
     }
   };
 
   const captureCameraPhoto = () => {
     const video = cameraVideoRef.current;
-    if (!video || !video.videoWidth || !video.videoHeight) return;
+    if (!video || !video.videoWidth || !video.videoHeight || isPreparingPhoto) return;
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const context = canvas.getContext('2d');
-    if (!context) return;
+    if (!context) { setErrorBanner('unreadable-image'); return; }
     context.drawImage(video, 0, 0);
+    const captureId = ++photoRequestRef.current;
+    setIsPreparingPhoto(true);
     canvas.toBlob((blob) => {
-      if (!blob) return;
-      const file = new File([blob], `fieldvoice-${Date.now()}.jpg`, { type: 'image/jpeg' });
-      if (file.size > 8 * 1024 * 1024) {
-        setErrorBanner('too-large');
-        setCameraStream(null);
-        return;
-      }
-      const url = URL.createObjectURL(file);
-      setScanDraft((prev) => ({ ...prev, photoFile: file, photoPreviewUrl: url, photoSizeMb: Number((file.size / (1024 * 1024)).toFixed(1)) }));
-      setCameraStream(null);
+      if (!mountedRef.current || captureId !== photoRequestRef.current) return;
+      closeCamera();
+      if (!blob) { setIsPreparingPhoto(false); setErrorBanner('unreadable-image'); return; }
+      void acceptPhoto(new File([blob], `farmpal-${Date.now()}.jpg`, { type: 'image/jpeg' }));
     }, 'image/jpeg', 0.9);
   };
 
@@ -114,14 +208,14 @@ export const ScanScreen: React.FC = () => {
   };
 
   const handleAnalyze = () => {
-    if (scanSubmissionStartedRef.current) return;
+    if (scanSubmissionStartedRef.current || isPreparingPhoto) return;
     const cropSelectionError = validateCropSelection(scanDraft.cropType, scanDraft.customCropName);
     if (cropSelectionError) {
       setErrorBanner(cropSelectionError);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
-    if (!scanDraft.photoPreviewUrl) {
+    if (!scanDraft.photoFile || !scanDraft.photoPreviewUrl) {
       setErrorBanner('no-photo');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
@@ -135,7 +229,7 @@ export const ScanScreen: React.FC = () => {
       (window as any).SpeechRecognition ||
       (window as any).webkitSpeechRecognition;
 
-    if (!SR) return; // silent — manual typing fallback is already there
+    if (!SR) { setVoiceMessage('Voice input is not available in this browser. You can type your note.'); return; }
 
     if (recognitionRef.current) {
       recognitionRef.current.abort();
@@ -147,6 +241,7 @@ export const ScanScreen: React.FC = () => {
     rec.interimResults = false;
     recognitionRef.current = rec;
 
+    setVoiceMessage('');
     setIsRecording(true);
 
     rec.onresult = (e: any) => {
@@ -156,9 +251,9 @@ export const ScanScreen: React.FC = () => {
         observations: (prev.observations ? `${prev.observations} ${text}` : text).slice(0, 1000),
       }));
     };
-    rec.onerror = () => setIsRecording(false);
-    rec.onend   = () => setIsRecording(false);
-    rec.start();
+    rec.onerror = () => { setIsRecording(false); setVoiceMessage('Voice input could not finish. You can type your note or try again.'); };
+    rec.onend = () => setIsRecording(false);
+    try { rec.start(); } catch { setIsRecording(false); setVoiceMessage('Voice input could not start. You can type your note.'); }
   };
 
   /* ── Derived ── */
@@ -223,6 +318,11 @@ export const ScanScreen: React.FC = () => {
           </div>
         )}
 
+        {errorBanner === 'unreadable-image' && <div role="alert" className="bg-[#2C1A1A] border border-[#5C2020] rounded-2xl p-4 text-xs text-[#FFB4A8]">
+          This photo could not be opened. Choose a clear JPEG, PNG or WebP photo, or take another photo.
+        </div>}
+        {isPreparingPhoto && <p role="status" className="text-xs text-[#D1D5DB]">Opening your crop photo…</p>}
+
         {/* Hidden inputs */}
         <input
           ref={galleryRef}
@@ -238,8 +338,8 @@ export const ScanScreen: React.FC = () => {
             <div className="relative rounded-xl overflow-hidden bg-black aspect-square">
               <video ref={cameraVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" aria-label="Camera preview" />
             </div>
-            <button onClick={captureCameraPhoto} className="w-full bg-[#176B45] hover:bg-[#1eb968] text-white py-3 rounded-xl text-xs font-semibold cursor-pointer transition">Capture Photo</button>
-            <button onClick={() => setCameraStream(null)} className="w-full bg-[#292C2A] text-white py-2.5 rounded-xl text-xs font-semibold cursor-pointer">Cancel</button>
+            <button onClick={captureCameraPhoto} disabled={isPreparingPhoto} className="w-full bg-[#176B45] hover:bg-[#1eb968] text-white py-3 rounded-xl text-xs font-semibold cursor-pointer transition">Capture Photo</button>
+            <button onClick={cancelCamera} className="w-full bg-[#292C2A] text-white py-2.5 rounded-xl text-xs font-semibold cursor-pointer">Cancel</button>
           </div>
         ) : cameraBlocked ? (
           /* Camera blocked */
@@ -267,9 +367,10 @@ export const ScanScreen: React.FC = () => {
             </button>
             <button
               onClick={openCamera}
+              disabled={cameraPending}
               className="text-xs text-[#A1A7A3] hover:text-white transition cursor-pointer"
             >
-              Try Camera Again
+              {cameraPending ? 'Opening camera…' : 'Try Camera Again'}
             </button>
           </div>
         ) : !hasPhoto ? (
@@ -285,10 +386,11 @@ export const ScanScreen: React.FC = () => {
             <div className="flex flex-col gap-2.5 w-full">
               <button
                 onClick={openCamera}
+                disabled={cameraPending}
                 className="w-full bg-[#176B45] hover:bg-[#1eb968] active:scale-[0.98] transition text-white font-semibold text-xs py-3 rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-sm"
               >
                 <Camera className="w-4 h-4" />
-                Take Photo
+                {cameraPending ? 'Opening camera…' : 'Take Photo'}
               </button>
               <button
                 onClick={() => galleryRef.current?.click()}
@@ -310,7 +412,7 @@ export const ScanScreen: React.FC = () => {
               />
               <span className="absolute top-2.5 left-2.5 bg-black/60 backdrop-blur-md text-white text-[11px] px-2.5 py-0.5 rounded-full font-medium flex items-center gap-1.5 border border-white/10">
                 <span className="w-2 h-2 rounded-full bg-[#22C55E]" />
-                Photo ready ({scanDraft.photoSizeMb || 2.4} MB)
+                Photo ready ({scanDraft.photoSizeMb < 0.1 ? '<0.1' : scanDraft.photoSizeMb} MB)
               </span>
             </div>
             <button
@@ -397,7 +499,7 @@ export const ScanScreen: React.FC = () => {
             />
             <button
               onClick={startSpeechRecognition}
-              title="Start voice note (Pidgin / Eket / English)"
+              title="Start voice input (Nigerian English)"
               aria-label="Start voice input"
               className={`absolute right-3 bottom-3.5 w-9 h-9 rounded-full bg-[#FF8A32] flex items-center justify-center text-white active:scale-90 shadow-md transition ${
                 isRecording ? 'animate-pulse ring-4 ring-orange-400/30' : 'hover:brightness-110'
@@ -409,14 +511,17 @@ export const ScanScreen: React.FC = () => {
 
           <div className="flex items-center gap-2 mt-2.5 text-[11px] text-[#8F9490]">
             <Radio className="w-3.5 h-3.5 shrink-0" />
-            <span>Voice recognition: Eket / Pidgin / English</span>
+            <span>Voice input uses Nigerian English. You can also type your note.</span>
           </div>
         </div>
+
+        {voiceMessage && <p role="status" className="text-xs text-[#D1D5DB]">{voiceMessage}</p>}
 
         {/* ── Analyze Button ── */}
         <div className="flex flex-col items-center gap-2">
           <button
             onClick={handleAnalyze}
+            disabled={isPreparingPhoto}
             className="w-full bg-[#176B45] hover:bg-[#1eb968] active:scale-[0.98] transition text-white font-semibold text-sm py-3.5 rounded-xl cursor-pointer shadow-md"
           >
             Check crop

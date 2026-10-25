@@ -12,6 +12,7 @@ import { TopHeader } from '../components/common/TopHeader';
 import { ScanImage } from '../components/common/ScanImage';
 import { useApp } from '../context/useApp';
 import { sortScansNewestFirst } from '../data/scanOrdering';
+import { cropOptions } from '../data/cropFamilies';
 import type { CropType, ScanItem } from '../types';
 
 const getBadgeClasses = (variant: 'red' | 'amber' | 'green') => {
@@ -57,8 +58,7 @@ export const HistoryScreen: React.FC = () => {
   const { scans } = useApp();
   const [filter, setFilter] = useState<'All' | CropType>('All');
 
-  const cassavaCount  = scans.filter((s) => s.cropType === 'Cassava').length;
-  const plantainCount = scans.filter((s) => s.cropType === 'Plantain').length;
+  const cropFilters = cropOptions.map((crop) => ({ ...crop, count: scans.filter((scan) => scan.cropType === crop.type).length }));
   const hasSampleScans = scans.some((scan) => /^scan-[1-4]$/.test(scan.id));
 
   const displayed = sortScansNewestFirst(filter === 'All' ? scans : scans.filter((s) => s.cropType === filter));
@@ -86,22 +86,15 @@ export const HistoryScreen: React.FC = () => {
             active={filter === 'All'}
             onClick={() => setFilter('All')}
           />
-          {cassavaCount > 0 && (
+          {cropFilters.filter((crop) => crop.count > 0).map((crop) => (
             <HistoryFilterChip
-              label="Cassava"
-              count={cassavaCount}
-              active={filter === 'Cassava'}
-              onClick={() => setFilter('Cassava')}
+              key={crop.type}
+              label={crop.label}
+              count={crop.count}
+              active={filter === crop.type}
+              onClick={() => setFilter(crop.type)}
             />
-          )}
-          {plantainCount > 0 && (
-            <HistoryFilterChip
-              label="Plantain"
-              count={plantainCount}
-              active={filter === 'Plantain'}
-              onClick={() => setFilter('Plantain')}
-            />
-          )}
+          ))}
         </div>
 
         {/* Empty state */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { collection, deleteDoc, doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, deleteField, doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { updateProfile } from 'firebase/auth';
 import type { CropAssessment, ScanItem, UserProfile } from '../types';
 import { AppContext } from './AppContextStore';
@@ -8,7 +8,10 @@ import { useAuth } from './useAuth';
 import { deleteScanPhoto, getScanPhoto, saveScanPhoto } from '../data/photoStore';
 import { firebaseAuth, firestore } from '../lib/firebase';
 import { CropPhotoRequestError, deleteCloudCropPhoto, getCloudCropPhoto } from '../data/photoApi';
+import { deleteFirebaseCropPhoto, getFirebaseCropPhoto } from '../data/firebasePhotoStore';
+import { FirebasePhotoStoreError } from '../data/firebasePhotoSync';
 import { mergeCloudScans, toCachedScan } from '../data/scanCache';
+import { updateScanAssessment } from '../data/assessmentState';
 
 const initialDraft: ScanDraft = {
   photoFile: null,
@@ -123,6 +126,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const localScan: ScanItem = {
       ...savedScan,
       cloudPhotoPath: undefined,
+      firebasePhotoPath: undefined,
       dataScope: 'local-only',
       footerStatus: 'Saved on this device only',
     };
@@ -145,7 +149,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Replacing the original bytes must also replace its displayed preview.
       imageUrl: scan.imageUrl.startsWith('blob:') ? '' : scan.imageUrl,
       photoStorageKey,
-      photoScope: scan.cloudPhotoPath ? 'cloud' : 'local-only',
+      photoScope: scan.firebasePhotoPath || scan.cloudPhotoPath ? 'cloud' : 'local-only',
     }));
   }, []);
 
@@ -158,20 +162,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const applyAssessment = useCallback((scanId: string, assessment: CropAssessment | undefined, status: NonNullable<ScanItem['assessmentStatus']>, summary?: string, failure?: ScanItem['assessmentFailure']) => {
-    setScans((previous) => previous.map((scan) => scan.id !== scanId ? scan : {
-      ...scan,
-      ...(assessment ? { assessment } : {}),
-      assessmentStatus: status,
-      assessmentFailure: status === 'failed' ? failure : undefined,
-      ...(summary ? { summary } : {}),
-      footerIcon: status === 'completed' ? 'check' : status === 'inconclusive' || status === 'failed' || status === 'unavailable' ? 'alert' : 'clock',
-      footerStatus: status === 'completed' ? 'Crop check ready'
-        : status === 'inconclusive' ? 'Not sure yet'
-          : status === 'processing' ? 'Checking crop'
-            : status === 'pending' ? 'Ready to check'
-              : status === 'unavailable' ? 'Crop check unavailable' : 'Could not check',
-      footerActionLabel: status === 'failed' ? 'Try again' : 'See result',
-    }));
+    setScans((previous) => previous.map((scan) => scan.id !== scanId ? scan
+      : updateScanAssessment(scan, assessment, status, summary, failure)));
   }, []);
 
   const markScanFailed = useCallback(async (scanId: string, summary: string, failure?: ScanItem['assessmentFailure']) => {
@@ -186,18 +178,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!scan) return false;
     let localPhoto: Blob | undefined;
     try { if (scan.photoStorageKey) localPhoto = await getScanPhoto(scan.photoStorageKey); }
-    catch { return false; }
-    if (scan.cloudPhotoPath) {
+    catch { /* A private cloud photo can still be read when device storage is unavailable. */ }
+    let firebasePhotoRemoved = false;
+    let supabasePhotoRemoved = false;
+    const accountScan = scan.dataScope !== 'local-only';
+    if (scan.cloudPhotoPath && !localPhoto) {
       if (!user) return false;
+      try { localPhoto = await getCloudCropPhoto({ scanId: scan.id, idToken: await user.getIdToken() }); }
+      catch (error) {
+        if (!(error instanceof CropPhotoRequestError) || error.code !== 'PHOTO_NOT_FOUND') return false;
+      }
+    }
+    if (scan.firebasePhotoPath) {
       if (!localPhoto) {
-        try { localPhoto = await getCloudCropPhoto({ scanId: scan.id, idToken: await user.getIdToken() }); }
+        try { localPhoto = await getFirebaseCropPhoto({ scanId: scan.id, firebasePhotoPath: scan.firebasePhotoPath }); }
         catch (error) {
-          // A missing cloud object has nothing left to preserve. Other retrieval
-          // failures stop deletion before any remote data is removed.
-          if (!(error instanceof CropPhotoRequestError) || error.code !== 'PHOTO_NOT_FOUND') return false;
+          if (!(error instanceof FirebasePhotoStoreError) || error.code !== 'PHOTO_NOT_FOUND') return false;
         }
       }
-      try { await deleteCloudCropPhoto({ scanId: scan.id, idToken: await user.getIdToken() }); }
+      try {
+        await deleteFirebaseCropPhoto({ scanId: scan.id, firebasePhotoPath: scan.firebasePhotoPath });
+        firebasePhotoRemoved = true;
+      } catch (error) {
+        if (error instanceof FirebasePhotoStoreError && ['PHOTO_NOT_FOUND', 'PHOTO_REFERENCE_SAVE_FAILED'].includes(error.code)) firebasePhotoRemoved = true;
+        else return false;
+      }
+    }
+    if (scan.cloudPhotoPath) {
+      if (!user) return false;
+      try {
+        await deleteCloudCropPhoto({ scanId: scan.id, idToken: await user.getIdToken() });
+        supabasePhotoRemoved = true;
+      }
       catch { return false; }
     }
 
@@ -210,20 +222,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setScans((prev) => prev.filter((s) => s.id !== id));
       return true;
     } catch {
-      // If the database deletion failed after removing the local photo, restore
-      // the photo when possible so the still-existing scan remains viewable.
-      if (scan.photoStorageKey && localPhoto) {
-        try { await saveScanPhoto(scan.photoStorageKey, localPhoto); } catch { /* report failure either way */ }
-      } else if (scan.cloudPhotoPath && localPhoto) {
-        const restoreKey = `${uid}/${scan.id}`;
+      // If removing the scan record fails after a cloud object was deleted,
+      // restore a device copy and clear only references to objects actually
+      // removed. Any surviving legacy reference remains separate and intact.
+      if (localPhoto && (firebasePhotoRemoved || supabasePhotoRemoved)) {
+        const restoreKey = scan.photoStorageKey ?? `${uid}/${scan.id}`;
         try {
           await saveScanPhoto(restoreKey, localPhoto);
-          if (firestore && uid) await updateDoc(doc(firestore, 'users', uid, 'scans', id), {
+          if (accountScan && firestore && uid) {
+            const updates = {
+              ...(firebasePhotoRemoved ? { firebasePhotoPath: deleteField() } : {}),
+              ...(supabasePhotoRemoved ? { cloudPhotoPath: deleteField() } : {}),
+              photoStorageKey: restoreKey,
+              photoScope: (scan.firebasePhotoPath && !firebasePhotoRemoved) || (scan.cloudPhotoPath && !supabasePhotoRemoved)
+                ? 'cloud'
+                : 'local-only',
+              updatedAt: serverTimestamp(),
+            };
+            await updateDoc(doc(firestore, 'users', uid, 'scans', id), updates);
+          }
+          setScans((previous) => previous.map((item) => item.id !== id ? item : {
+            ...item,
             photoStorageKey: restoreKey,
-            photoScope: 'local-only',
-            updatedAt: serverTimestamp(),
-          });
-          setScans((previous) => previous.map((item) => item.id === id ? { ...item, photoStorageKey: restoreKey, cloudPhotoPath: undefined, photoScope: 'local-only' } : item));
+            firebasePhotoPath: firebasePhotoRemoved ? undefined : item.firebasePhotoPath,
+            cloudPhotoPath: supabasePhotoRemoved ? undefined : item.cloudPhotoPath,
+            photoScope: (item.firebasePhotoPath && !firebasePhotoRemoved) || (item.cloudPhotoPath && !supabasePhotoRemoved)
+              ? 'cloud'
+              : 'local-only',
+          }));
         } catch { /* keep the operation reported as failed */ }
       }
       return false;
@@ -269,7 +295,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
    * Returns the new ScanItem so the caller can navigate to its assessment route.
    */
   const createScanFromDraft = useCallback((): ScanItem => {
-    const id = `scan-${Date.now()}`;
+    const id = `scan-${Date.now()}-${crypto.randomUUID()}`;
     const crop = scanDraft.cropType ?? 'Cassava';
     const cropName = crop === 'Other' ? scanDraft.customCropName.trim() : '';
     const previewUrl = scanDraft.photoPreviewUrl ?? '/assets/cassava-leaf-sample.png';
