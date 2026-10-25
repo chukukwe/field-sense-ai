@@ -39,7 +39,7 @@ export const SeasonSenseScreen: React.FC = () => {
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-[#A7F3D0]"><Sprout className="h-5 w-5" aria-hidden="true" /></span>
             <div className="min-w-0">
               <h2 className="mt-1 text-lg font-bold leading-tight text-white">Plan for your area</h2>
-              <p className="mt-1 text-xs leading-relaxed text-white/80">Choose your state and local government area. Farm Guide will match the LGA to an estimated farming zone and show its seasonal crop calendar.</p>
+              <p className="mt-1 text-xs leading-relaxed text-white/80">Choose your state and local government area. Farm Guide shows a broad farming-zone estimate, draft seasonal windows and crop care notes. Confirm local conditions before planting.</p>
             </div>
           </div>
         </section>

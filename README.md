@@ -48,9 +48,13 @@ Configure the existing Supabase bucket as private and allow the image content ty
 
 ## Farm Guide
 
-- Farm Guide asks for a state and LGA, then the **See plan** button opens a brief preparation state followed by the selected zone's current-month and next-month crop calendar. Crop cards expand to show an image and short illustrative planting notes. The location and calendar data are local; it makes no weather or location-service requests.
-- The state/LGA names come from the MIT-licensed `xosasx/nigerian-local-government-areas` dataset; see `src/data/LGA_SOURCE_LICENSE.txt`. The LGA-to-zone map is a latitude/coastal heuristic, not an official boundary map. 375 LGAs are flagged for review.
-- Every crop-calendar row in the included seed data is marked `draft` internally. Farm Guide shows the estimated zone and seasonal windows, but it does not show live weather forecasts or verified planting dates. Farmers should confirm planting decisions locally.
+- Farm Guide opens a local plan immediately after state/LGA selection. Farmers can choose a month and water supply, including December-to-January planning. Rainfall-only plans exclude dry-season planting entries; irrigation does not establish suitability.
+- State/LGA names come from the MIT-licensed `xosasx/nigerian-local-government-areas` dataset; see `src/data/LGA_SOURCE_LICENSE.txt`. Zone assignments remain approximate and 375 LGAs are flagged for review. This release does not replace those assignments with an unverified map.
+- Calendar rows remain draft and are labelled as estimates. Regional harvest windows do not predict a farmer's harvest date. No live weather or farm-coordinate service is called.
+- The crop care library works independently of calendar availability. Cassava, maize, plantain and okra have source-linked general guidance from IITA, NAERLS and FARA; other crop notes remain explicitly pending source review. None are marked agronomist-verified.
+- Water and crop preferences are saved per selected area on this device, with a fallback when local storage is blocked. Basic guidance remains available offline once the app is cached; external NiMet and NAERLS links require a connection.
+- See `docs/farm-guide-evidence.md` for source scope, remaining data review and weather integration requirements.
+
 
 ## Environment variables
 

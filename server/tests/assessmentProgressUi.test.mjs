@@ -642,7 +642,7 @@ test('unmounting clears the progress interval', async () => {
   }
 });
 
-test('Farm Guide selects an area, prepares its plan, and opens crop planting notes', async () => {
+test('Farm Guide opens an offline plan with honest seasonal estimates, crop care and saved choices', async () => {
   const appContext = { setHelpModalOpen() {}, scans: [] };
   const originalFetch = globalThis.fetch;
   let fetchCalls = 0;
@@ -676,21 +676,37 @@ test('Farm Guide selects an area, prepares its plan, and opens crop planting not
     assert.ok(seePlan);
     assert.equal(seePlan.disabled, false);
     await act(async () => { seePlan.dispatchEvent(new browserWindow.MouseEvent('click', { bubbles: true })); });
-    assert.match(mount.host.textContent, /Putting your farm plan together/);
-    assert.doesNotMatch(mount.host.textContent, /Plant this month/);
-    await act(async () => delay(6_000));
+    assert.doesNotMatch(mount.host.textContent, /Putting your farm plan together/);
     assert.match(mount.host.textContent, /Eket, Akwa Ibom/);
     assert.match(mount.host.textContent, /Mangrove \/ Freshwater Swamp/);
     assert.match(mount.host.textContent, /Crop calendar/);
-    assert.match(mount.host.textContent, /Plant this month/);
-    assert.doesNotMatch(mount.host.textContent, /Draft/);
-    assert.doesNotMatch(mount.host.textContent, /not a live weather forecast/i);
+    assert.match(mount.host.textContent, /Possible planting windows/);
+    assert.match(mount.host.textContent, /draft seasonal estimates/);
+    assert.match(mount.host.textContent, /not a live weather forecast/i);
     const cassavaCard = [...mount.host.querySelectorAll('button')].find((button) => button.textContent.includes('Cassava'));
     assert.ok(cassavaCard);
     assert.equal(cassavaCard.querySelector('img')?.getAttribute('src'), '/assets/thumb-cassava.png');
     await act(async () => { cassavaCard.dispatchEvent(new browserWindow.MouseEvent('click', { bubbles: true })); });
     assert.match(mount.host.textContent, /How to plant/);
     assert.match(mount.host.textContent, /stem cuttings/i);
+    const planSelects = mount.host.querySelectorAll('select');
+    assert.equal(planSelects.length, 3);
+    await act(async () => {
+      planSelects[0].value = '12';
+      planSelects[0].dispatchEvent(new browserWindow.Event('change', { bubbles: true }));
+    });
+    assert.match(mount.host.textContent, /January \(next year\)/);
+    await act(async () => {
+      planSelects[1].value = 'irrigation';
+      planSelects[1].dispatchEvent(new browserWindow.Event('change', { bubbles: true }));
+      planSelects[2].value = 'Plantain';
+      planSelects[2].dispatchEvent(new browserWindow.Event('change', { bubbles: true }));
+    });
+    assert.match(mount.host.textContent, /FARA: Plantain production/);
+    const savedChoices = JSON.parse(browserWindow.localStorage.getItem('farmpal-guide-plan-' + state.value + '-' + eket.value));
+    assert.deepEqual(savedChoices, { water: 'irrigation', crop: 'Plantain' });
+    assert.match(mount.host.textContent, /Local agronomist review is still needed/);
+    assert.ok(mount.host.querySelector('a[href*="nimet.gov.ng"]'));
     assert.equal(fetchCalls, 0);
   } finally {
     globalThis.fetch = originalFetch;

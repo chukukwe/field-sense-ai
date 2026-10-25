@@ -5,7 +5,23 @@
     "outDir": ".test-dist",
     "noEmit": false,
     "allowImportingTsExtensions": false,
-    "types": ["node", "vite/client"]
+    "types": [
+      "node",
+      "vite/client"
+    ]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "../src/data/assessmentApi.ts", "../src/data/assessmentProgress.ts", "../src/data/cropFamilies.ts", "../src/data/farmGuideData.ts", "../src/data/firebasePhotoSync.ts", "../src/data/photoApi.ts", "../src/data/photoStore.ts", "../src/data/sampleCropResults.ts", "../src/data/seasonGuide.ts", "../src/types.ts"]
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "../src/data/assessmentApi.ts",
+    "../src/data/assessmentProgress.ts",
+    "../src/data/cropFamilies.ts",
+    "../src/data/farmGuideData.ts",
+    "../src/data/firebasePhotoSync.ts",
+    "../src/data/photoApi.ts",
+    "../src/data/photoStore.ts",
+    "../src/data/seasonGuide.ts",
+    "../src/types.ts",
+    "../src/data/farmGuidePlanning.ts"
+  ]
 }

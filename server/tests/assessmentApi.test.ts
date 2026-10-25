@@ -1,3 +1,4 @@
+import { getLagosMonth, getPlanningMonth, getPlantingWindows, cropCare } from '../../src/data/farmGuidePlanning.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { AssessmentRequestError, requestCropAssessment, ASSESSMENT_REQUEST_TIMEOUT_MS } from '../../src/data/assessmentApi.js';
@@ -218,5 +219,32 @@ describe('frontend assessment API helper', () => {
     assert.equal(translated.summary, 'Dis photo no show enough detail.');
     assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer test-token');
     await assert.rejects(translateAssessmentToPidgin(result, 'test-token', async () => Response.json({ assessment: { summary: 'bad' } })), /could not be loaded/i);
+  });
+});
+
+describe('Farm Guide planning conditions', () => {
+  it('uses Lagos dates and rejects invalid planning months', () => {
+    assert.equal(getLagosMonth(new Date('2026-12-31T23:30:00Z')), 1);
+    for (const value of [null, '', '0', '13', '-1', '1.5', 'NaN', '01']) assert.equal(getPlanningMonth(value, 7), 7);
+    assert.equal(getPlanningMonth('12', 7), 12);
+  });
+  it('keeps dry-season entries out of rain-only planting plans across every zone and month', () => {
+    let dryEntries = 0;
+    for (const zone of farmGuideData.zones) for (let month = 1; month <= 12; month += 1) {
+      const rain = getPlantingWindows(zone.id, month, 'rainfall');
+      const irrigation = getPlantingWindows(zone.id, month, 'irrigation');
+      assert.ok(rain.every((entry) => entry.seasonLabel !== 'dry_season'));
+      assert.ok(rain.every((entry) => irrigation.some((other) => other.cropId === entry.cropId && other.seasonLabel === entry.seasonLabel)));
+      dryEntries += irrigation.filter((entry) => entry.seasonLabel === 'dry_season').length;
+    }
+    assert.ok(dryEntries > 0, 'Test must exercise real dry-season entries');
+  });
+  it('keeps the first crop care guides source-linked without changing draft calendar status', () => {
+    for (const crop of ['Cassava', 'Maize', 'Plantain', 'Okra']) {
+      const care = cropCare[crop]; assert.ok(care);
+      assert.ok(care.beforePlanting && care.water && care.earlyCare && care.harvest && care.scope);
+      assert.match(care.source.url, /^https:\/\//);
+    }
+    assert.ok(farmGuideData.calendar.every((entry) => entry.status === 'draft'));
   });
 });
