@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Camera, Clock, Trash2, Image as ImageIcon, CloudUpload, CheckCircle2 } from 'lucide-react';
+import { Camera, Clock, Trash2, Image as ImageIcon, CloudUpload } from 'lucide-react';
 import { TopHeader } from '../components/common/TopHeader';
 import { ScanImage } from '../components/common/ScanImage';
 import { useApp } from '../context/useApp';
@@ -222,16 +222,7 @@ export const ScanDetailsScreen: React.FC = () => {
           if (selected) void uploadExistingPhoto(scan, user, selected);
         }} />
 
-        {scan.firebasePhotoPath || scan.cloudPhotoPath ? (
-          <div className="flex items-start gap-2 rounded-xl border border-[#286443] bg-[#1B3427] px-3 py-2.5 text-xs text-[#B8F2D0]" role="status">
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#22C55E]" aria-hidden="true" />
-            <div>
-              <p className="font-semibold">Photo saved to your account</p>
-              <p className="mt-0.5 text-[#C6D2CA]">This photo is linked to your account. Your scan record and any completed result sync there too.</p>
-              {!scan.photoStorageKey && <button type="button" onClick={() => setPhotoReload((value) => value + 1)} className="mt-1 font-semibold text-[#6EE7A8] hover:underline">Reload photo</button>}
-            </div>
-          </div>
-        ) : scan.photoStorageKey && scan.photoScope !== 'missing' ? (
+        {scan.firebasePhotoPath || scan.cloudPhotoPath ? null : scan.photoStorageKey && scan.photoScope !== 'missing' ? (
           <div className="rounded-xl border border-[#4B513C] bg-[#292C2A] px-3 py-3">
             <div className="flex items-start gap-2 text-xs text-[#E7E9E7]">
               <CloudUpload className="mt-0.5 h-4 w-4 shrink-0 text-[#1EB968]" aria-hidden="true" />
