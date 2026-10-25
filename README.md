@@ -50,9 +50,9 @@ Configure the existing Supabase bucket as private and allow the image content ty
 
 - Farm Guide opens a local plan immediately after state/LGA selection. Farmers can choose a month and water supply, including December-to-January planning. Rainfall-only plans exclude dry-season planting entries; irrigation does not establish suitability.
 - State/LGA names come from the MIT-licensed `xosasx/nigerian-local-government-areas` dataset; see `src/data/LGA_SOURCE_LICENSE.txt`. Zone assignments remain approximate and 375 LGAs are flagged for review. This release does not replace those assignments with an unverified map.
-- Calendar rows remain draft and are labelled as estimates. Regional harvest windows do not predict a farmer's harvest date. No live weather or farm-coordinate service is called.
+- Calendar rows remain draft and are labelled as estimates. Regional harvest windows do not predict a farmer's harvest date. NiMet seasonal rainfall predictions load through the authenticated API; they are not current weather observations. No farm-coordinate service is called.
 - The crop care library works independently of calendar availability. Cassava, maize, plantain and okra have source-linked general guidance from IITA, NAERLS and FARA; other crop notes remain explicitly pending source review. None are marked agronomist-verified.
-- Water and crop preferences are saved per selected area on this device, with a fallback when local storage is blocked. Basic guidance remains available offline once the app is cached; external NiMet and NAERLS links require a connection.
+- Water and crop preferences are saved per selected area on this device, with a fallback when local storage is blocked. Basic guidance remains available offline once the app is cached; the NiMet outlook and external source links require a connection.
 - See `docs/farm-guide-evidence.md` for source scope, remaining data review and weather integration requirements.
 
 
@@ -60,7 +60,7 @@ Configure the existing Supabase bucket as private and allow the image content ty
 
 **Frontend:** `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET` (used only to read legacy Firebase photo references), `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`, optional `VITE_REQUIRE_EMAIL_VERIFICATION`, and optional `VITE_API_BASE_URL`.
 
-**Backend:** `GEMINI_API_KEY`, `GEMINI_MODEL`, `PORT`, `MAX_IMAGE_MB`, `ALLOWED_ORIGINS`, `FIREBASE_PROJECT_ID`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (or the supported legacy `SUPABASE_SERVICE_ROLE_KEY`), and `SUPABASE_PHOTO_BUCKET` for private crop-photo storage. Render supplies `PORT`. `GOOGLE_APPLICATION_CREDENTIALS` is only needed when using a local service-account file instead of workload identity or Application Default Credentials.
+**Backend:** `NIMET_API_KEY` (seasonal rainfall, backend only), `GEMINI_API_KEY`, `GEMINI_MODEL`, `PORT`, `MAX_IMAGE_MB`, `ALLOWED_ORIGINS`, `FIREBASE_PROJECT_ID`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (or the supported legacy `SUPABASE_SERVICE_ROLE_KEY`), and `SUPABASE_PHOTO_BUCKET` for private crop-photo storage. Render supplies `PORT`. `GOOGLE_APPLICATION_CREDENTIALS` is only needed when using a local service-account file instead of workload identity or Application Default Credentials.
 
 Never place Gemini, Supabase, or Firebase Admin credentials in a `VITE_*` variable. Firebase web configuration is public client configuration; Firebase Admin credentials are private server credentials.
 
@@ -83,3 +83,5 @@ Deploy `server/` as a separate Render Node.js web service with Root Directory `s
 For Netlify, use Build Command `npm run build` and publish directory `dist`. Set the frontend's `VITE_API_BASE_URL` to the Render HTTPS service origin and provide the registered Firebase web-app configuration, including the existing Storage bucket value. Configure backend `ALLOWED_ORIGINS` with the exact deployed frontend origin, including `https://` and any custom domain. Do not use `*` or add server credentials to Netlify. This repository does not change Render or Netlify service settings, deploy Firebase rules, or verify live external services.
 
 After deployment, check `/health`, then test an authenticated assessment with a test account and crop photo. A healthy process response does not prove that Firebase credentials, Firestore permissions, Gemini access, or private photo storage are configured correctly.
+
+NiMet uses the official seasonal rainfall endpoint, matches state/LGA/year exactly, and caches valid responses for up to 12 hours. Missing records, provider failures and missing credentials remain explicit; no nearby location or previous year is substituted. Dates are predictions. Retrieval time is distinct from provider publication time.

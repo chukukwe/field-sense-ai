@@ -649,10 +649,10 @@ test('Farm Guide opens an offline plan with honest seasonal estimates, crop care
   globalThis.fetch = async () => { fetchCalls += 1; throw new Error('Farm Guide must not call a service'); };
   const mount = createMount(createElement(MemoryRouter, { initialEntries: ['/farm-guide'] },
     createElement(AppContext.Provider, { value: appContext },
-      createElement(Routes, null,
+      createElement(AuthContext.Provider, { value: {user: null} }, createElement(Routes, null,
         createElement(Route, { path: '/farm-guide', element: createElement(SeasonSenseScreen) }),
         createElement(Route, { path: '/farm-guide/plan', element: createElement(FarmGuidePlanScreen) }),
-      ))));
+      )))));
   try {
     await mount.render();
     const selects = mount.host.querySelectorAll('select');
@@ -706,7 +706,8 @@ test('Farm Guide opens an offline plan with honest seasonal estimates, crop care
     const savedChoices = JSON.parse(browserWindow.localStorage.getItem('farmpal-guide-plan-' + state.value + '-' + eket.value));
     assert.deepEqual(savedChoices, { water: 'irrigation', crop: 'Plantain' });
     assert.match(mount.host.textContent, /Local agronomist review is still needed/);
-    assert.ok(mount.host.querySelector('a[href*="nimet.gov.ng"]'));
+    assert.match(mount.host.textContent, /NiMet seasonal outlook/);
+    assert.match(mount.host.textContent, /Retry outlook/);
     assert.equal(fetchCalls, 0);
   } finally {
     globalThis.fetch = originalFetch;
@@ -746,3 +747,32 @@ after(async () => {
   await browserWindow.happyDOM.abort();
   await viteServer.close();
 });
+
+test('NiMet outlook renders seasonal predictions inside Farm Guide and retries a failed request', async () => {
+  const originalFetch = globalThis.fetch;
+  let requests = 0;
+  const year = Number(new Intl.DateTimeFormat('en', {year:'numeric',timeZone:'Africa/Lagos'}).format(new Date()));
+  globalThis.fetch = async (_input, init) => {
+    requests++;
+    assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer weather-test-token');
+    return requests === 1 ? Response.json({error:{code:'NIMET_UNAVAILABLE'}},{status:503}) : Response.json({status:'available',fetchedAt:new Date().toISOString(),record:{state:'Akwa Ibom',lga:'Eket',year,onset:'3 March',cessation:'17 December',lengthOfSeason:289,annualRainfall:2792}});
+  };
+  const { FarmGuideRainfall } = await viteServer.ssrLoadModule('/src/components/common/FarmGuideRainfall.tsx');
+  const mount = createMount(createElement(AuthContext.Provider,{value:{user:{getIdToken:async()=> 'weather-test-token'}}},createElement(FarmGuideRainfall,{stateId:3,lgaId:79,areaName:'Eket, Akwa Ibom'})));
+  try {
+    await mount.render();
+    await act(async()=>delay(50));
+    assert.match(mount.host.textContent,/could not be loaded/);
+    const retry = [...mount.host.querySelectorAll('button')].find(x=>x.textContent==='Retry outlook');
+    assert.ok(retry);
+    await act(async()=>retry.dispatchEvent(new browserWindow.MouseEvent('click',{bubbles:true})));
+    await act(async()=>delay(50));
+    assert.match(mount.host.textContent,/3 March/);
+    assert.match(mount.host.textContent,/289 days/);
+    assert.match(mount.host.textContent,/2,792 mm/);
+    assert.match(mount.host.textContent,/seasonal prediction/);
+    assert.equal(requests,2);
+    assert.equal(mount.host.querySelector('a[href*="nimet.gov.ng"]'),null);
+  } finally {globalThis.fetch=originalFetch;await mount.unmount();}
+});
+

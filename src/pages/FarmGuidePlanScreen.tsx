@@ -1,3 +1,4 @@
+import { FarmGuideRainfall } from '../components/common/FarmGuideRainfall';
 import React, { useEffect, useState } from 'react';
 import { ChevronDown, MapPin, Sprout } from 'lucide-react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
@@ -60,12 +61,12 @@ const AreaPlan: React.FC<{
         <p className="mt-2 text-[11px] text-[#A1A7A3]">Water supply and crop choices are saved on this device. {preferences.water === 'rainfall' ? 'Dry-season planting entries are hidden. Wait for dependable rains before planting.' : 'Irrigation does not remove heat, flooding or soil risks. Confirm a suitable crop and water plan locally.'}</p>
       </section>
 
+      <FarmGuideRainfall stateId={state.id} lgaId={lga.id} areaName={`${lga.name}, ${state.name}`} />
+
       <section className="rounded-2xl border border-[#5C4930] bg-[#2E271C] p-4" aria-label="Before you plant">
         <h2 className="text-sm font-bold text-[#FFD29D]">Before you plant</h2>
         <p className="mt-2 text-xs leading-relaxed text-[#E4D8C4]">Calendar dates are draft seasonal estimates, not a live weather forecast or a confirmed planting recommendation for your farm.</p>
         <p className="mt-2 text-xs leading-relaxed text-[#E4D8C4]">Check that rain or irrigation can support the crop, the ground drains well, and the variety suits your area. Confirm timing with a local farm adviser.</p>
-        <a href={guideSources.climate.url} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-xs font-semibold text-[#A7F3D0] underline">Check the NiMet seasonal outlook ↗</a>
-        <p className="mt-1 text-[10px] text-[#C9BDA9]">Opens online. FarmPal has not fetched a forecast for this LGA.</p>
       </section>
 
       <section className="flex flex-col gap-3" aria-label="Crop calendar">

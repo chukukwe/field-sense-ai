@@ -10,7 +10,7 @@ Source review: 25 October 2026. This is a record of the implementation's evidenc
 | Maize | [NAERLS, planting date/time/method for SAMMAZ 63, updated May 2024](https://nfhl.naerls.gov.ng/index.php?action=faq&cat=24&id=4&artlang=en) | Established rains matter and timing varies across years and zones. The humid-zone month ranges in this variety-specific entry are not applied nationwide. |
 | Plantain | [FARA, Innovation Opportunities in Plantain Production in Nigeria (2016), pp. 8–9](https://library.faraafrica.org/wp-content/uploads/2019/10/Guidebook-Plantain-production-in-Nigeria-rev.pdf) | Rainy-season establishment, moisture needs, timely field care, and crop/market-based maturity assessment. No LGA calendar rows are added from these broad observations. |
 | Okra | [NAERLS, Okra agronomic practices](https://kms.naerls.gov.ng/variety/viewdetails/176) | Direct sowing, establishment checks, early replacement of failed stands, weeding, and tender-pod harvesting. This is not generic advice for every vegetable. |
-| Seasonal climate | [NiMet seasonal outlook](https://nimet.gov.ng/scp?id=3), [2026 launch advisory](https://nimet.gov.ng/news?id=194) | Link farmers to the official outlook. Early showers do not establish rainy-season onset. The application does not download or infer a local forecast from this national advisory. |
+| Seasonal climate | [NiMet seasonal outlook](https://nimet.gov.ng/scp?id=3), [2026 launch advisory](https://nimet.gov.ng/news?id=194) | Link farmers to the official outlook. Early showers do not establish rainy-season onset. The app retrieves the exact state/LGA/year seasonal rainfall record from the NiMet API. This is separate from the national advisory and from daily weather. |
 
 The app's text is a concise paraphrase. Detailed spacing, pesticide and fertiliser prescriptions are not copied into a location-general plan.
 
@@ -28,7 +28,7 @@ The calendar shows possible planting windows and typical regional harvest window
 - Crop care independent of calendar availability, including plantain and okra.
 - Visible source scope, source-check date, and pending local agronomist review.
 - General introduction notes for other existing crops remain labelled pending source review.
-- Cached local guidance makes no external data requests. Source links require internet access.
+- Cached crop guidance remains local. The authenticated NiMet outlook calls the backend, which uses the private key. Source links require internet access.
 
 ## Remaining work requiring additional evidence
 
@@ -39,3 +39,7 @@ The calendar shows possible planting windows and typical regional harvest window
 5. Expand crop-specific source coverage and planting-date-based crop management plans after variety and production-method review.
 
 No claim is made that a forecast, agronomist review, or authoritative zone correction has been completed.
+
+## NiMet integration verified
+
+The existing private NIMET_API_KEY returned HTTP 200 from https://api.nimet.gov.ng/api/srp for Akwa Ibom / Eket / 2026. NiMet returned Eket and a partial-name match for Esit-Eket; only the exact area and year are used. Fields observed: onset, season_end, season_length, annual_rainfall, year, lga_name and state_name. FarmPal labels dates and totals as predictions, provides retrieval time, caches for at most 12 hours, and does not use these values to verify the draft calendar. The national-outlook redirect is removed from the plan. Daily forecasts and farm-coordinate weather remain future work.

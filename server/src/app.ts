@@ -1,3 +1,5 @@
+import { farmGuideData, getFarmGuideLocation } from '../../src/data/farmGuideData.js';
+import { NimetServiceError, type SeasonalRainfallRequest, type SeasonalRainfallResult } from './nimet.js';
 import cors from 'cors';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
@@ -47,6 +49,7 @@ export interface AnalyzeDependencies {
   failScan: (uid: string, scanId: string, publicMessage: string) => Promise<void>;
   assessImage: (image: Buffer, mimeType: string, cropType: string, observations: string, requestId: string) => Promise<unknown>;
   translateAssessment?: (assessment: CropAssessmentResult) => Promise<unknown>;
+  getSeasonalRainfall?: (input: SeasonalRainfallRequest) => Promise<SeasonalRainfallResult>;
   allowedOrigins: string[];
   limiterMax?: number;
   maxImageBytes?: number;
@@ -212,6 +215,27 @@ export function createApp(deps: AnalyzeDependencies) {
     allowedHeaders: ['Authorization', 'Content-Type'],
   }));
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+  const rainfallLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false, keyGenerator: rateLimitClientKey });
+  app.get('/api/farm-guide/rainfall', rainfallLimiter, (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    void (async () => {
+      const token = /^Bearer\s+(\S+)$/i.exec(req.header('authorization') ?? '');
+      if (!token) return sendError(res, 401, 'AUTH_REQUIRED', 'Sign in to load the seasonal outlook.');
+      try { await deps.verifyIdToken(token[1]!); } catch (error) { return sendAuthenticationError(res, error); }
+      const query = z.object({ stateId: z.string().regex(/^[1-9]\d*$/), lgaId: z.string().regex(/^[1-9]\d*$/), year: z.string().regex(/^20\d{2}$/) }).strict().safeParse(req.query);
+      if (!query.success) return sendError(res, 400, 'NIMET_REQUEST_INVALID', 'Choose a valid area and year.');
+      const state = farmGuideData.states.find((item) => item.id === Number(query.data.stateId));
+      const lga = getFarmGuideLocation(Number(query.data.lgaId));
+      if (!state || !lga || lga.stateId !== state.id) return sendError(res, 400, 'NIMET_REQUEST_INVALID', 'Choose a matching state and local area.');
+      if (!deps.getSeasonalRainfall) return sendError(res, 503, 'NIMET_NOT_CONFIGURED', 'The seasonal outlook is not available right now.', true);
+      try { return res.json(await deps.getSeasonalRainfall({ state: state.name, lga: lga.name, year: Number(query.data.year) })); }
+      catch (error) {
+        if (error instanceof NimetServiceError) return sendError(res, error.status, error.code, error.publicMessage, error.retryable);
+        return sendError(res, 502, 'NIMET_UNAVAILABLE', 'The seasonal outlook could not be loaded. Try again later.', true);
+      }
+    })().catch(() => sendError(res, 500, 'INTERNAL_ERROR', 'The outlook could not be loaded.'));
+  });
+
   const translationLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false, keyGenerator: rateLimitClientKey });
   app.post('/api/assessment/translate-pidgin', translationLimiter, (req, res) => {
     express.json({ limit: '32kb' })(req, res, (parseError?: unknown) => {

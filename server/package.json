@@ -9,7 +9,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server/src/index.js",
-    "test": "tsc -p tsconfig.test.json && node --test .test-dist/server/tests/analyzeCrop.test.js .test-dist/server/tests/assessmentApi.test.js .test-dist/server/tests/photoStorage.test.js .test-dist/server/tests/photoApi.test.js .test-dist/server/tests/supabasePhotoStore.test.js .test-dist/server/tests/firebasePhotoSync.test.js .test-dist/server/tests/cropFamilies.test.js && node --test tests/devEnvironment.test.mjs tests/assessmentProgressUi.test.mjs tests/scanCaptureUi.test.mjs tests/scanRecoveryUi.test.mjs",
+    "test": "tsc -p tsconfig.test.json && node --test .test-dist/server/tests/nimet.test.js .test-dist/server/tests/analyzeCrop.test.js .test-dist/server/tests/assessmentApi.test.js .test-dist/server/tests/photoStorage.test.js .test-dist/server/tests/photoApi.test.js .test-dist/server/tests/supabasePhotoStore.test.js .test-dist/server/tests/firebasePhotoSync.test.js .test-dist/server/tests/cropFamilies.test.js && node --test tests/devEnvironment.test.mjs tests/assessmentProgressUi.test.mjs tests/scanCaptureUi.test.mjs tests/scanRecoveryUi.test.mjs",
     "dev:farmpal": "npm run build && node dev-farmpal.mjs"
   },
   "dependencies": {

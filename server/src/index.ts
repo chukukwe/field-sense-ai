@@ -1,3 +1,4 @@
+import { createNimetService } from './nimet.js';
 import 'dotenv/config';
 import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
@@ -48,7 +49,9 @@ const photoStore = supabaseUrl && supabaseApiKey
 if (!photoStore) {
   console.warn('Private crop photo storage is disabled: configure SUPABASE_URL and either SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY in the backend environment.');
 }
+const nimet = createNimetService(process.env.NIMET_API_KEY);
 const app = createApp({
+  getSeasonalRainfall: (input) => nimet.getSeasonalRainfall(input),
   allowedOrigins,
   maxImageBytes: maxImageMb * 1024 * 1024,
   photoStore,
