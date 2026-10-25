@@ -6,7 +6,6 @@ import { advanceEstimatedProgress, getAssessmentProgressMessage } from '../../sr
 import type { CropAssessment, ScanItem } from '../../src/types.js';
 import { updateScanAssessment } from '../../src/data/assessmentState.js';
 import { translateAssessmentToPidgin } from '../../src/data/pidginTranslationApi.js';
-import { canOfferSampleCropResult, getSampleCropResult } from '../../src/data/sampleCropResults.js';
 import { getSeasonGuideEntry, seasonGuideAreas, type SeasonGuidePeriod } from '../../src/data/seasonGuide.js';
 import { farmGuideData, getFarmGuideCalendarEntries, getFarmGuideLocation, getFarmGuideLocations, getFarmGuideZone } from '../../src/data/farmGuideData.js';
 
@@ -132,48 +131,6 @@ describe('frontend assessment API helper', () => {
       (error: unknown) => error instanceof AssessmentRequestError
         && error.code === 'GEMINI_TIMEOUT' && error.status === 504 && error.retryable && error.message === 'The assessment timed out.',
     );
-  });
-
-  it('offers a prepared sample only for known provider availability failures', () => {
-    assert.equal(canOfferSampleCropResult({ code: 'GEMINI_QUOTA', status: 429 }, 'Cassava'), true);
-    assert.equal(canOfferSampleCropResult({ code: 'GEMINI_TIMEOUT', status: 504 }, 'Maize'), true);
-    assert.equal(canOfferSampleCropResult({ code: 'GEMINI_UNAVAILABLE', status: 503 }, 'Plantain'), true);
-    assert.equal(canOfferSampleCropResult({ code: 'GEMINI_UNAVAILABLE', status: 502 }, 'Plantain'), true);
-    assert.equal(canOfferSampleCropResult({ code: 'ASSESSMENT_TIMEOUT', status: 504 }, 'Cassava'), true);
-    assert.equal(canOfferSampleCropResult({ code: 'ASSESSMENT_TIMEOUT', status: 408 }, 'Cassava'), true);
-    assert.equal(canOfferSampleCropResult({ code: 'ASSESSMENT_UNAVAILABLE', status: 503 }, 'Cassava'), true);
-    for (const failure of [
-      { code: 'GEMINI_QUOTA', status: 503 },
-      { code: 'GEMINI_UNAVAILABLE', status: 504 },
-      { code: 'GEMINI_AUTH_FAILED', status: 503 },
-      { code: 'RATE_LIMITED', status: 429 },
-      { code: 'AUTH_REQUIRED', status: 401 },
-      { code: 'SCAN_NOT_FOUND', status: 404 },
-      { code: 'INVALID_IMAGE', status: 415 },
-      { code: 'INVALID_REQUEST', status: 400 },
-      { code: 'NETWORK_ERROR', status: 0 },
-      { code: 'UNKNOWN_ERROR', status: 500 },
-    ]) {
-      assert.equal(canOfferSampleCropResult(failure, 'Cassava'), false);
-    }
-    assert.equal(canOfferSampleCropResult({ code: 'GEMINI_QUOTA', status: 429 }, 'Other'), false);
-  });
-
-  it('keeps sample results structured and separate from the uploaded photo', () => {
-    for (const crop of ['Cassava', 'Plantain', 'Maize', 'Vegetables'] as const) {
-      const sample = getSampleCropResult(crop);
-      assert.ok(sample);
-      assert.equal(sample.source, 'sample');
-      assert.equal(sample.saved, false);
-      assert.equal(sample.assessment.status, 'inconclusive');
-      assert.ok(sample.assessment.disclaimer.toLowerCase().includes('sample'));
-      const limitations: string[] = sample.assessment.limitations;
-      assert.ok(limitations.some((item: string) => item.toLowerCase().includes('not made from your photo')));
-    }
-    assert.equal(getSampleCropResult('Maize')?.possibleProblem, 'Leaf spots');
-    assert.match(getSampleCropResult('Vegetables')?.title ?? '', /healthy-looking/i);
-    assert.equal(getSampleCropResult('Vegetables')?.assessment.possibleCauses.length, 0);
-    assert.equal(getSampleCropResult('Other'), undefined);
   });
 
   it('provides consistent offline season examples for each supported area, crop, and period', () => {

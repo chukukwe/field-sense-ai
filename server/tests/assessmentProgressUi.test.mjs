@@ -42,7 +42,6 @@ const { useAssessmentProgress } = await viteServer.ssrLoadModule('/src/hooks/use
 const { requestCropAssessment } = await viteServer.ssrLoadModule('/src/data/assessmentApi.ts');
 const { SeasonSenseScreen } = await viteServer.ssrLoadModule('/src/pages/SeasonSenseScreen.tsx');
 const { FarmGuidePlanScreen } = await viteServer.ssrLoadModule('/src/pages/FarmGuidePlanScreen.tsx');
-const { SampleCropResultScreen } = await viteServer.ssrLoadModule('/src/pages/SampleCropResultScreen.tsx');
 const { CropAssessmentScreen } = await viteServer.ssrLoadModule('/src/pages/CropAssessmentScreen.tsx');
 const { ScanningScreen } = await viteServer.ssrLoadModule('/src/pages/ScanningScreen.tsx');
 const { ScanImage } = await viteServer.ssrLoadModule('/src/components/common/ScanImage.tsx');
@@ -695,80 +694,6 @@ test('Farm Guide selects an area, prepares its plan, and opens crop planting not
     assert.equal(fetchCalls, 0);
   } finally {
     globalThis.fetch = originalFetch;
-    await mount.unmount();
-  }
-});
-
-test('sample result appears only for a matching failed scan and is not saved as an assessment', async () => {
-  const scan = {
-    id: 'scan-sample-test',
-    cropType: 'Cassava',
-    assessmentStatus: 'failed',
-    assessmentFailure: { code: 'GEMINI_TIMEOUT', status: 504 },
-  };
-  const appContext = { setHelpModalOpen() {}, scans: [scan] };
-  const state = { scanId: scan.id, source: 'assessment', cropType: scan.cropType, failure: scan.assessmentFailure };
-  const mount = createMount(createElement(MemoryRouter, { initialEntries: [{ pathname: '/sample-result', state }] },
-    createElement(AppContext.Provider, { value: appContext },
-      createElement(SampleCropResultScreen))));
-  try {
-    await mount.render();
-    assert.match(mount.host.textContent, /Sample result/);
-    assert.match(mount.host.textContent, /Sample result — this was not checked from your photo\./i);
-    assert.match(mount.host.textContent, /Dry, brown edges on cassava leaves/);
-    assert.equal(scan.assessment, undefined);
-  } finally {
-    await mount.unmount();
-  }
-});
-
-test('provider failure offers an explicit sample choice and the sample is not shown until selected', async () => {
-  const scan = {
-    id: 'scan-fallback-test',
-    cropType: 'Cassava',
-    assessmentStatus: 'failed',
-    assessmentFailure: { code: 'GEMINI_TIMEOUT', status: 504 },
-    summary: 'The crop check took too long. Your scan is saved. Try again later.',
-    imageUrl: '',
-    photoScope: 'local-only',
-  };
-  const appContext = {
-    setHelpModalOpen() {}, scans: [scan], resetScanDraft() {},
-    applyAssessment() {}, async markScanFailed() {},
-  };
-  const authContext = { user: null, fullName: '', loading: false, configured: false };
-  const mount = createMount(createElement(MemoryRouter, { initialEntries: [`/assessment/${scan.id}`] },
-    createElement(AppContext.Provider, { value: appContext },
-      createElement(AuthContext.Provider, { value: authContext },
-        createElement(Routes, null,
-          createElement(Route, { path: '/assessment/:id', element: createElement(CropAssessmentScreen) }),
-          createElement(Route, { path: '/sample-result', element: createElement(SampleCropResultScreen) }),
-          createElement(Route, { path: '/', element: createElement('p', { 'data-home': true }, 'FarmPal home') }),
-        )))));
-  try {
-    await mount.render();
-    assert.match(mount.host.textContent, /Crop check is unavailable right now\./);
-    assert.match(mount.host.textContent, /We can show you an example result while you wait\./);
-    assert.doesNotMatch(mount.host.textContent, /Dry, brown edges on cassava leaves/);
-    assert.equal([...mount.host.querySelectorAll('button')].some((button) => button.textContent.trim() === 'Try again'), false,
-      'without a signed-in user and saved photo, samples remain an explicit choice while assessment retry is unavailable');
-
-    const viewSample = [...mount.host.querySelectorAll('button')].find((button) => button.textContent.trim() === 'View sample result');
-    assert.ok(viewSample);
-    await act(async () => viewSample.dispatchEvent(new browserWindow.MouseEvent('click', { bubbles: true })));
-    assert.match(mount.host.textContent, /Sample result — this was not checked from your photo\./i);
-    assert.match(mount.host.textContent, /Dry, brown edges on cassava leaves/);
-    assert.equal(scan.assessment, undefined, 'opening a sample must not write an assessment to the scan');
-
-    const backToScan = [...mount.host.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Back to your scan');
-    assert.ok(backToScan);
-    await act(async () => backToScan.dispatchEvent(new browserWindow.MouseEvent('click', { bubbles: true })));
-    const later = [...mount.host.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Try again later');
-    assert.ok(later);
-    await act(async () => later.dispatchEvent(new browserWindow.MouseEvent('click', { bubbles: true })));
-    assert.match(mount.host.querySelector('[data-home]')?.textContent ?? '', /FarmPal home/);
-    assert.equal(scan.assessment, undefined);
-  } finally {
     await mount.unmount();
   }
 });

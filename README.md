@@ -46,13 +46,11 @@ Configure the existing Supabase bucket as private and allow the image content ty
 - Nigerian Pidgin translation is requested separately. It is temporary display text and does not overwrite the saved English assessment.
 - Gemini output is validated before saving. Results are guidance for inspection and are not a confirmed diagnosis.
 
-## Farm Guide and sample results
+## Farm Guide
 
 - Farm Guide asks for a state and LGA, then the **See plan** button opens a brief preparation state followed by the selected zone's current-month and next-month crop calendar. Crop cards expand to show an image and short illustrative planting notes. The location and calendar data are local; it makes no weather or location-service requests.
 - The state/LGA names come from the MIT-licensed `xosasx/nigerian-local-government-areas` dataset; see `src/data/LGA_SOURCE_LICENSE.txt`. The LGA-to-zone map is a latitude/coastal heuristic, not an official boundary map. 375 LGAs are flagged for review.
 - Every crop-calendar row in the included seed data is marked `draft` internally. Farm Guide shows the estimated zone and seasonal windows, but it does not show live weather forecasts or verified planting dates. Farmers should confirm planting decisions locally.
-- If the backend reports a known Gemini quota limit, timeout, or temporary outage, the user can choose to view a prepared crop example. The app does not show it automatically.
-- Sample crop results are marked as samples and are not written to scan history, Firestore, or analytics. Authentication, photo checks, and scan ownership rules stay in place.
 
 ## Environment variables
 
@@ -69,7 +67,7 @@ Run the scripts defined in the root `package.json`:
 - `npm run typecheck` checks frontend types and builds the API TypeScript.
 - `npm run lint` checks the frontend and shared code.
 - `npm run lint:server` checks API code and tests.
-- `npm run server:test` runs mocked API and storage tests plus mounted UI checks for capture validation, camera cleanup, duplicate prevention, scan recovery, progress, history, Farm Guide, and sample results. It does not call live Gemini, Supabase, or Firebase services.
+- `npm run server:test` runs mocked API and storage tests plus mounted UI checks for capture validation, camera cleanup, duplicate prevention, scan recovery, progress, history, and Farm Guide. It does not call live Gemini, Supabase, or Firebase services.
 - `npm run test:rules` runs Firestore and Storage Rules tests in the Firebase Emulators.
 - `npm run build` creates the production frontend in `dist`.
 - `npm run server:build` creates the production API in `server/dist`.

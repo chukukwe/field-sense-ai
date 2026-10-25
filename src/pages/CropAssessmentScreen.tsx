@@ -26,7 +26,6 @@ import { usePidginAssessment } from '../data/usePidginAssessment';
 import { useAssessmentProgress } from '../hooks/useAssessmentProgress';
 import { AssessmentProgressIndicator } from '../components/common/AssessmentProgressIndicator';
 import { PidginAssessmentControls } from '../components/common/PidginAssessmentControls';
-import { canOfferSampleCropResult } from '../data/sampleCropResults';
 
 type AssessmentVariant = 'single' | 'multiple' | 'unidentified' | 'unclear' | 'offline';
 
@@ -220,8 +219,7 @@ export const CropAssessmentScreen: React.FC = () => {
       || scan.assessmentStatus === 'unavailable'
       || technicalFailure
       || scan.assessmentStatus === 'processing';
-    const canViewSample = technicalFailure && !scan.assessment && !scan.diagnosis
-      && canOfferSampleCropResult(scan.assessmentFailure, scan.cropType);
+
     return (
       <div className="flex flex-col gap-4 pb-8">
         <TopHeader
@@ -276,12 +274,6 @@ export const CropAssessmentScreen: React.FC = () => {
               disabled={isRetrying}
               className="w-full bg-[#176B45] hover:bg-[#1eb968] disabled:opacity-60 text-white py-3 rounded-xl text-xs font-semibold cursor-pointer transition"
             >{isRetrying ? 'Checking your crop…' : technicalFailure ? 'Try again' : scan.assessmentStatus === 'processing' ? 'Check again' : 'Check crop'}</button>}
-            {canViewSample && <div className="rounded-xl border border-[#5C3A1E] bg-[#2E2319] p-3">
-              <p className="text-xs font-semibold text-[#FFD29D]">Crop check is unavailable right now.</p>
-              <p className="mt-1 text-xs leading-relaxed text-[#F2D1AE]">We can show you an example result while you wait.</p>
-              <button type="button" onClick={() => navigate('/sample-result', { state: { scanId: scan.id, source: 'assessment', cropType: scan.cropType, failure: scan.assessmentFailure } })} className="mt-3 w-full rounded-xl bg-[#176B45] py-3 text-xs font-semibold text-white transition hover:bg-[#1eb968]">View sample result</button>
-              <button type="button" onClick={() => navigate('/')} className="mt-2 w-full rounded-xl bg-[#292C2A] py-3 text-xs font-semibold text-white transition hover:bg-[#343835]">Try again later</button>
-            </div>}
             {isRetrying && <AssessmentProgressIndicator progress={assessmentProgress.progress} message={assessmentProgress.message} />}
             {retryError && retryError !== scan.summary && <p role="alert" className="text-xs text-[#FFB4A8]">{retryError}</p>}
           </div>

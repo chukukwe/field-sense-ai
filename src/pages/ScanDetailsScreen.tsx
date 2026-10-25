@@ -12,7 +12,6 @@ import { getScanPhoto, saveScanPhoto } from '../data/photoStore';
 import { usePidginAssessment } from '../data/usePidginAssessment';
 import { PidginAssessmentControls } from '../components/common/PidginAssessmentControls';
 import { simpleConfidence, simpleLikelihood } from '../data/assessmentLanguage';
-import { canOfferSampleCropResult } from '../data/sampleCropResults';
 import { loadAssessmentPhoto } from '../data/loadAssessmentPhoto';
 import { useAssessmentProgress } from '../hooks/useAssessmentProgress';
 import { AssessmentProgressIndicator } from '../components/common/AssessmentProgressIndicator';
@@ -37,8 +36,7 @@ export const ScanDetailsScreen: React.FC = () => {
 
   const scan = scans.find((item) => item.id === id);
   const diagnosis = scan?.diagnosis;
-  const canViewSample = Boolean(scan && !scan.assessment && !diagnosis
-    && canOfferSampleCropResult(scan.assessmentFailure, scan.cropType));
+
   const { language, setLanguage, translated, display: assessment, loading: translationLoading, error: translationError } = usePidginAssessment(scan?.id, scan?.assessment);
   const isSampleScan = Boolean(scan && /^scan-[1-4]$/.test(scan.id));
   const canCheckCrop = Boolean(scan && !scan.assessment && !diagnosis
@@ -268,12 +266,6 @@ export const ScanDetailsScreen: React.FC = () => {
             {assessmentBusy ? 'Checking your crop…' : scan.assessmentStatus === 'failed' ? 'Try again' : scan.assessmentStatus === 'processing' ? 'Check again' : 'Check crop'}
           </button>
           {assessmentBusy && <div className="mt-3"><AssessmentProgressIndicator progress={assessmentProgress.progress} message={assessmentProgress.message} /></div>}
-          {canViewSample && <div className="mt-3 rounded-xl border border-[#5C3A1E] bg-[#241C15] p-3">
-            <p className="text-xs font-semibold text-[#FFD29D]">Crop check is unavailable right now.</p>
-            <p className="mt-1 text-xs leading-relaxed text-[#F2D1AE]">We can show you an example result while you wait.</p>
-            <button type="button" onClick={() => navigate('/sample-result', { state: { scanId: scan.id, source: 'scan-details', cropType: scan.cropType, failure: scan.assessmentFailure } })} className="mt-3 w-full rounded-xl bg-[#176B45] py-3 text-xs font-semibold text-white transition hover:bg-[#1eb968]">View sample result</button>
-            <button type="button" onClick={() => navigate('/')} className="mt-2 w-full rounded-xl bg-[#292C2A] py-3 text-xs font-semibold text-white transition hover:bg-[#343835]">Try again later</button>
-          </div>}
           {assessmentMessage && assessmentMessage !== scan.summary && <p role="alert" className="mt-2 text-xs text-[#FFB4A8]">{assessmentMessage}</p>}
           {(scan.photoScope === 'missing' || (!scan.photoStorageKey && !scan.firebasePhotoPath && !scan.cloudPhotoPath)) && <button type="button" onClick={() => photoInput.current?.click()} className="mt-2 text-xs font-semibold text-[#1EB968]">Choose a replacement photo</button>}
         </section>}

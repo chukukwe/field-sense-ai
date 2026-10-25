@@ -232,13 +232,13 @@ test('the assessment page retries a saved account photo when IndexedDB is unavai
 });
 
 for (const page of ['scan', 'assessment']) {
-  test(page + ' recovery keeps an authenticated retry available alongside an optional sample', async () => {
+  test(page + ' recovery keeps an authenticated retry available without sample results', async () => {
     const scan = { ...makeScan('failed'), assessmentFailure: { code: 'GEMINI_TIMEOUT', status: 504 } };
     const mount = mountScan(scan, page);
     try {
       await mount.render();
       assert.ok(button(mount.host, 'Try again'));
-      assert.ok(button(mount.host, 'View sample result'));
+      assert.equal([...mount.host.querySelectorAll('button')].some((item) => item.textContent.trim() === 'View sample result'), false);
       assert.equal(scan.assessment, undefined);
       assert.doesNotMatch(mount.host.textContent, /Dry, brown edges on cassava leaves/);
     } finally { await mount.unmount(); }

@@ -14,7 +14,6 @@ import { SettingsScreen } from './pages/SettingsScreen';
 import { ProfileScreen } from './pages/ProfileScreen';
 import { SeasonSenseScreen } from './pages/SeasonSenseScreen';
 import { FarmGuidePlanScreen } from './pages/FarmGuidePlanScreen';
-import { SampleCropResultScreen } from './pages/SampleCropResultScreen';
 import { requireEmailVerification } from './lib/firebase';
 import { getSavedFarmGuideLocation } from './data/farmGuideLocationStorage';
 
@@ -61,7 +60,6 @@ export function App() {
               <Route path="/farm-guide/area" element={<SeasonSenseScreen />} />
               <Route path="/farm-guide/plan" element={<FarmGuidePlanScreen />} />
               <Route path="/season-sense" element={<Navigate to="/farm-guide" replace />} />
-              <Route path="/sample-result" element={<SampleCropResultScreen />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
