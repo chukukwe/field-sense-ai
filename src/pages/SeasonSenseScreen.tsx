@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown, MapPin, Sprout } from 'lucide-react';
+import { MapPin, Sprout } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { TopHeader } from '../components/common/TopHeader';
 import {
@@ -52,12 +52,11 @@ export const SeasonSenseScreen: React.FC = () => {
                 <select
                   value={stateId}
                   onChange={(event) => chooseState(event.target.value)}
-                  className="w-full appearance-none rounded-xl border border-[#3B423E] bg-[#181B19] py-3 pl-3 pr-10 text-xs text-white focus:border-[#176B45] focus:outline-none"
+                  className="farm-guide-select w-full appearance-none rounded-xl border border-[#3B423E] bg-[#181B19] py-3 pl-3 pr-12 text-xs text-white focus:border-[#176B45] focus:outline-none"
                 >
                   <option value="">Choose your state</option>
                   {farmGuideData.states.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                 </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#A1A7A3]" aria-hidden="true" />
               </span>
             </label>
 
@@ -68,12 +67,11 @@ export const SeasonSenseScreen: React.FC = () => {
                   value={validLga ? lgaId : ''}
                   disabled={!state}
                   onChange={(event) => chooseLga(event.target.value)}
-                  className="w-full appearance-none rounded-xl border border-[#3B423E] bg-[#181B19] py-3 pl-3 pr-10 text-xs text-white focus:border-[#176B45] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                  className="farm-guide-select w-full appearance-none rounded-xl border border-[#3B423E] bg-[#181B19] py-3 pl-3 pr-12 text-xs text-white focus:border-[#176B45] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <option value="">{state ? 'Choose your LGA' : 'Choose a state first'}</option>
                   {locations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                 </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#A1A7A3]" aria-hidden="true" />
               </span>
             </label>
           </div>

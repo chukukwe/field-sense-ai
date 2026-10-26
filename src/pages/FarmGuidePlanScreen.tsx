@@ -12,7 +12,7 @@ const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'Jul
 const seasonNames: Record<string, string> = { dry_season: 'Dry season', first_season: 'First season', main_season: 'Main season', second_season: 'Second season' };
 function formatSeasonName(season: string) { return seasonNames[season] ?? season.replaceAll('_', ' '); }
 const cropNames = [...new Set([...Object.keys(cropCare), ...Object.keys(farmGuideCropDetails)])];
-const fieldClass = 'mt-2 w-full rounded-xl border border-[#3B423E] bg-[#181B19] p-3 text-xs text-white';
+const fieldClass = 'farm-guide-select mt-2 w-full rounded-xl border border-[#3B423E] bg-[#181B19] py-3 pl-3 pr-12 text-xs text-white focus:border-[#176B45] focus:outline-none';
 const sectionClass = 'rounded-2xl border border-[#323633] bg-[#292C2A] p-4';
 
 export const FarmGuidePlanScreen: React.FC = () => {
