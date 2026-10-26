@@ -6,7 +6,7 @@ Prepared 26 October 2026. No independent agronomist approval has been obtained. 
 
 - `farm-guide-location-audit.csv`: all 774 LGA classifications, old/new zones, source and review decision.
 - `farm-guide-calendar-audit.csv`: all 277 legacy calendar rows. These rows lacked traceable evidence and are withheld from recommendations rather than relabelled verified.
-- `src/data/farmGuideReviewedCalendar.ts`: the replacement published windows for maize and groundnut, including partial-month wording, variety and water requirements. No reviewed harvest dates are supplied.
+- `src/data/farmGuideReviewedCalendar.ts`: the replacement published windows for maize, groundnut, cassava, soybean and cowpea in selected zones, including partial-month wording, variety and water requirements. No reviewed harvest dates are supplied.
 - `src/data/farmGuidePlanning.ts`: general care text for cassava, maize, plantain and okra.
 
 ## Resolved location questions
@@ -32,6 +32,6 @@ Use a separate decision of `approved`, `revise`, or `insufficient evidence` per 
 
 ## Priority gaps
 
-The date calendar still needs crop-specific evidence for cassava, cowpea, Irish potato, millet, rice, sorghum, soybean, tomato and yam. Care guidance also needs further crop-specific review. Plantain and okra have general care guidance but no published local calendar in the current replacement dataset. No dates should be added merely to fill an empty month.
+The date calendar still needs usable scoped evidence for Irish potato, millet, rice, sorghum, tomato and yam. Cassava, cowpea and soybean now have conditional published windows for selected zones; review their limits and the withheld Southern Guinea cowpea recommendation in farm-guide-calendar-review.md. Care guidance also needs further crop-specific review. Plantain and okra have general care guidance but no published local calendar in the current replacement dataset. No dates should be added merely to fill an empty month.
 
 This document is prepared for the user to share. FarmPal has not contacted an expert or represented the app as independently certified.

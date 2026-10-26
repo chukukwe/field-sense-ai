@@ -8,10 +8,12 @@ Updated 26 October 2026. Published-source checking is not independent agronomist
 - The initial pass matched 755 LGAs directly and corrected 309 heuristic zone assignments. The remaining 19 are now resolved using official spelling evidence, source-default logic and explicitly labelled research corroboration/inference. See the resolution supplement; this is not a whole-farm boundary survey.
 - Coastal classifications use the source's broad Humid Forest group. Rainforest/swamp/mangrove subzones are not inferred from a state or LGA name.
 - All 277 legacy calendar rows lacked traceable authoritative citations and production-method/variety scope. They remain in the raw dataset for audit but are not served to farmers as reviewed recommendations.
-- Replacement published planting windows currently cover maize and groundnut where the evidence supports the zone. Partial-month language is preserved. Variety, water and local conditions appear with every window.
+- Replacement published planting windows currently cover maize, groundnut, cassava, soybean and cowpea in selected zones where the evidence supports the zone. Partial-month language is preserved. Variety, water and local conditions appear with every window.
 - No source-reviewed harvest dates have been established; unsupported regional harvest-month claims are withheld.
 
 Audit files: [all location decisions](farm-guide-location-audit.csv), [all legacy calendar decisions](farm-guide-calendar-audit.csv), [agronomist review pack](farm-guide-agronomist-review.md).
+
+See the [crop-by-crop source review](farm-guide-calendar-review.md) for added windows, scope decisions and remaining gaps.
 
 ## Calendar sources
 

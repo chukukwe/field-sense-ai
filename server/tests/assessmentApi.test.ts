@@ -297,3 +297,28 @@ describe('Farm Guide published evidence gates', () => {
     }
   });
 });
+
+describe('additional calendar source scope', () => {
+  it('keeps cassava seasons conditional and excludes unsupported zones', () => {
+    const cassava = getFarmGuideCalendarEntries(2,8,'plant').find(e=>e.crop==='Cassava');
+    assert.ok(cassava); assert.match(cassava.conditions,/two rainy seasons/);
+    assert.equal(cassava.seasonLabel,'second_season');
+    for (const zone of [1,3,6,7,8]) for(let m=1;m<=12;m++)
+      assert.equal(getFarmGuideCalendarEntries(zone,m,'plant').some(e=>e.crop==='Cassava'),false);
+    assert.equal(getFarmGuideCalendarEntries(4,7,'plant').some(e=>e.crop==='Cassava'),false);
+  });
+  it('uses the specific Sudan soybean window over the overlapping broad row', () => {
+    assert.equal(getFarmGuideCalendarEntries(6,6,'plant').some(e=>e.crop==='Soybean'),false);
+    const july=getFarmGuideCalendarEntries(6,7,'plant').filter(e=>e.crop==='Soybean');
+    assert.equal(july.length,1); assert.ok(july[0]); assert.match(july[0].window,/First to second week/);
+    assert.match(july[0].conditions,/established rains/);
+    assert.ok(getFarmGuideCalendarEntries(5,6,'plant').some(e=>e.crop==='Soybean'));
+  });
+  it('preserves cowpea growth-habit limits and withholds the late Southern Guinea window', () => {
+    const cowpea=getFarmGuideCalendarEntries(5,8,'plant').find(e=>e.crop==='Cowpea');
+    assert.ok(cowpea); assert.equal(cowpea.window,'25 July–8 August');
+    assert.match(cowpea.conditions,/determinate early- or medium/);
+    assert.equal(getFarmGuideCalendarEntries(5,6,'plant').some(e=>e.crop==='Cowpea'),false);
+    for(let m=1;m<=12;m++) assert.equal(getFarmGuideCalendarEntries(4,m,'plant').some(e=>e.crop==='Cowpea'),false);
+  });
+});

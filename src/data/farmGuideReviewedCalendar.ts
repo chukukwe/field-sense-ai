@@ -30,4 +30,23 @@ for (const zone of [2,3,4,5,6,7]) {
   add(zone, 8, [10], 'End of October', groundnut, 'ICRISAT groundnut guide (2015)', 'Printed page 3, Table 1; dry-season chapter', 'Irrigated SAMNUT 24, 25 or 26 only. Confirm dependable water and local suitability; Harmattan cold can harm establishment.', 'dry_season');
   add(zone, 8, [2], 'Early February', groundnut, 'ICRISAT groundnut guide (2015)', 'Printed page 3, Table 1; dry-season chapter', 'Irrigated SAMNUT 24, 25 or 26 only. Confirm dependable water and local suitability; do not infer suitability for cold highland sites.', 'dry_season');
 }
+// Cassava: the source distinguishes two rainy seasons from savannah onset.
+// Limit the latter to Guinea savannas; do not infer suitability in arid/highland zones.
+const cassava = 'https://www.iita.org/wp-content/uploads/2016/06/Growing_cassava_commercially_in_Nigeria_an_illustrated_guide.pdf';
+add(2, 2, [4,5], 'April–May, at the start of the major rainy season', cassava, 'IITA: Growing cassava commercially in Nigeria', 'Printed page 8, Step 6', 'Only where two rainy seasons occur. Confirm a suitable local variety, moist well-drained soil and dependable rains for establishment.', 'first_season');
+add(2, 2, [8], 'August, at the start of the minor rainy season', cassava, 'IITA: Growing cassava commercially in Nigeria', 'Printed page 8, Step 6', 'Only where two rainy seasons occur and enough rain remains for establishment. Confirm local suitability; avoid dry-season planting where rains end early or the water table is low.', 'second_season');
+for (const zone of [4,5]) add(zone, 2, [5,6], 'May–June, at the start of the growing season', cassava, 'IITA: Growing cassava commercially in Nigeria', 'Printed page 8, Step 6', 'Conditional Guinea savanna guidance. Wait for dependable rains and moist, well-drained soil; confirm a locally suitable variety and sufficient establishment moisture.');
+
+const soybean = 'https://www.iita.org/wp-content/uploads/2020/07/Guide-to-Soybean-Production-in-Northern-Nigeria..pdf';
+add(4, 9, [6,7], 'Early June to early July', soybean, 'IITA soybean guide (2020, revised edition)', 'Printed page 7, Table 2', 'Rain-fed Southern Guinea savanna. Plant after rains are well established; confirm a locally suitable variety and enough remaining moisture.');
+add(5, 9, [6,7], 'Mid-June to early July', soybean, 'IITA soybean guide (2020, revised edition)', 'Printed page 7, Table 2, Northern Guinea–Sudan row', 'Rain-fed Northern Guinea savanna. Plant after rains are well established; confirm a locally suitable variety and enough remaining moisture.');
+add(6, 9, [7], 'First to second week of July', soybean, 'IITA soybean guide (2020, revised edition)', 'Printed page 7, Table 2, explicit Sudan savanna row', 'Rain-fed Sudan savanna. Use the source’s more specific Sudan window, after established rains; confirm variety suitability and remaining moisture.');
+
+const cowpea = 'https://biblio.iita.org/documents/U20BkOmoiguiCowpeaNothomNodev.pdf-c0c4714c7c29354d2ee191210918d6c2.pdf';
+// Restrict to the determinate early/medium branch, not every cowpea variety.
+// Southern Guinea is held pending local review of the unusually late window.
+add(7, 7, [6], '14–28 June', cowpea, 'IITA cowpea guide for northern Nigeria (2020)', 'Printed page 7, Table 1, determinate branch', 'Rain-fed, determinate early- or medium-maturing cowpea only. Confirm this growth habit and maturity with the seed supplier. Wait for established rains; ensure flowering has moisture and maturity falls in dry weather.');
+add(6, 7, [6,7], '25 June–24 July', cowpea, 'IITA cowpea guide for northern Nigeria (2020)', 'Printed page 7, Table 1, determinate branch', 'Rain-fed, determinate early- or medium-maturing cowpea only. Confirm growth habit, local suitability and established rains; ensure flowering has moisture and maturity falls in dry weather.');
+add(5, 7, [7,8], '25 July–8 August', cowpea, 'IITA cowpea guide for northern Nigeria (2020)', 'Printed page 7, Table 1, determinate branch', 'Rain-fed, determinate early- or medium-maturing cowpea only. Confirm growth habit, local suitability and established rains; ensure flowering has moisture and maturity falls in dry weather.');
+
 export const reviewedCalendar: readonly ReviewedCalendarEntry[] = rows;
