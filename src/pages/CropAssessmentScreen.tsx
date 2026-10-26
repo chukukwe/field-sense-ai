@@ -119,7 +119,7 @@ export const CropAssessmentScreen: React.FC = () => {
 
   // Only render the requested scan; never substitute another scan for an invalid ID.
   const scan = id === 'offline' && showStateSwitcher ? undefined : scans.find((item) => item.id === id);
-  const { language, setLanguage, translated, display: displayAssessment, loading: translationLoading, error: translationError } = usePidginAssessment(scan?.id, scan?.assessment);
+  const { language, setLanguage, translated, display: displayAssessment, loading: translationLoading, error: translationError, retry: retryTranslation } = usePidginAssessment(scan?.id, scan?.assessment);
   const isSampleScan = Boolean(scan && /^scan-[1-4]$/.test(scan.id));
   const photoSrc = scan?.imageUrl ?? '/assets/cassava-leaf-sample.png';
   const cropLabel = scan?.customCropName || scan?.cropType || 'Cassava';
@@ -242,7 +242,7 @@ export const CropAssessmentScreen: React.FC = () => {
               <p className="text-xs text-[#D1D5DB]">Your note: {scan.userObservations}</p>
             )}
             {assessment && <>
-              <PidginAssessmentControls language={language} onLanguageChange={setLanguage} loading={translationLoading} error={translationError}
+              <PidginAssessmentControls language={language} onLanguageChange={setLanguage} loading={translationLoading} error={translationError} onRetry={retryTranslation}
                 text={language === 'pidgin' && translated ? [assessment.summary, assessment.confidenceReason, ...assessment.observedSymptoms, ...assessment.possibleCauses.flatMap((cause) => [cause.name, cause.explanation]), ...assessment.recommendedActions, ...assessment.preventionTips, assessment.whenToSeekHelp, ...assessment.limitations, assessment.disclaimer].join('. ') : ''} />
               <p className="text-[11px] text-[#A1A7A3]">Crop: <span className="text-white">{scan.customCropName || scan.cropType}</span> · How sure: <span className="text-white">{simpleConfidence(assessment.confidence)}</span></p>
               <p className="text-[11px] text-[#A1A7A3]">{assessment.confidenceReason}</p>

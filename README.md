@@ -43,7 +43,7 @@ Configure the existing Supabase bucket as private and allow the image content ty
 - Pending, interrupted, failed, and unavailable scans can be checked again from Scan Details. Device-cache errors fall back to the existing private cloud photo; technical failures keep the original scan ID.
 - Assessment requests stop after four minutes (including upload and response reading), allowing the backend's 200-second provider budget. Photo-service requests stop after one minute. Saved cloud results are preserved if a late HTTP error arrives.
 - Repeating a completed assessment request returns its validated saved result without another provider call. An identical photo upload whose account link was interrupted can be safely linked on retry.
-- Nigerian Pidgin translation is requested separately. It is temporary display text and does not overwrite the saved English assessment.
+- Nigerian Pidgin translation is requested separately, with a retry action and a 90-second provider/110-second client budget. Translations are cached in memory for the current account and exact assessment, and do not overwrite the saved English assessment. Read-aloud uses a dedicated Pidgin voice if available, then a Nigerian English or other English browser voice with a pronunciation notice. Browsers without speech synthesis retain written translation.
 - Gemini output is validated before saving. Results are guidance for inspection and are not a confirmed diagnosis.
 
 ## Farm Guide

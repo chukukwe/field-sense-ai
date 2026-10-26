@@ -7,34 +7,42 @@ const translationCache = new Map<string, CropAssessment>();
 
 export function usePidginAssessment(key: string | undefined, source: CropAssessment | undefined) {
   const { user } = useAuth();
+  // A translation belongs to a user and the exact English assessment, not just
+  // a scan ID: a retry can replace that assessment and accounts can change.
+  const cacheKey = user && key && source ? JSON.stringify([user.uid, key, source]) : '';
   const [language, setLanguage] = useState<'english' | 'pidgin'>('english');
-  const [result, setResult] = useState<{ key: string; value: CropAssessment } | null>(() => key && translationCache.has(key)
-    ? { key, value: translationCache.get(key)! } : null);
-  const translated = result && result.key === key ? result.value : key ? translationCache.get(key) : undefined;
-  const [error, setError] = useState('');
-  const loading = language === 'pidgin' && Boolean(key && source && user && !translated && !error);
+  const [result, setResult] = useState<{ key: string; value: CropAssessment } | null>(null);
+  const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const translated = result?.key === cacheKey ? result.value : translationCache.get(cacheKey);
+  const error = failure?.key === cacheKey ? failure.message : '';
+  const loading = language === 'pidgin' && Boolean(cacheKey && !translated && !error);
 
   useEffect(() => {
-    let active = true;
-    if (language !== 'pidgin' || !key || !source || translationCache.has(key)) {
-      return () => { active = false; };
-    }
-    if (!user) return () => { active = false; };
-    void user.getIdToken().then((idToken) => translateAssessmentToPidgin(source, idToken)).then((value) => {
-      if (!active) return;
-      translationCache.set(key, value);
-      setResult({ key, value });
-    }).catch((reason: unknown) => {
-      if (active) setError(reason instanceof Error ? reason.message : 'Pidgin translation is unavailable. Your English result is still here.');
+    const controller = new AbortController();
+    if (language !== 'pidgin' || !cacheKey || !source || !user || translationCache.has(cacheKey)) return () => controller.abort();
+    void (async () => {
+      const idToken = await user.getIdToken();
+      if (controller.signal.aborted) return;
+      const value = await translateAssessmentToPidgin(source, idToken, fetch, controller.signal);
+      if (controller.signal.aborted) return;
+      if (translationCache.size >= 40) translationCache.delete(translationCache.keys().next().value!);
+      translationCache.set(cacheKey, value);
+      setResult({ key: cacheKey, value });
+    })().catch((reason: unknown) => {
+      if (!controller.signal.aborted) setFailure({ key: cacheKey, message: reason instanceof Error ? reason.message : 'Pidgin translation is unavailable.' });
     });
-    return () => { active = false; };
-  }, [key, language, source, user]);
+    return () => controller.abort();
+    // cacheKey contains the source and user identity; user object changes alone
+    // must not cancel an otherwise identical request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheKey, language, attempt]);
 
-  const changeLanguage = (next: 'english' | 'pidgin') => { setError(''); setLanguage(next); };
-
-  useEffect(() => () => {
-    if (typeof window !== 'undefined' && window.speechSynthesis) window.speechSynthesis.cancel();
-  }, []);
-
-  return { language, setLanguage: changeLanguage, translated, display: language === 'pidgin' && translated ? translated : source, loading, error: language === 'pidgin' && !user && source ? 'Sign in again to translate this result.' : error };
+  const retry = () => { if (loading) return; setFailure(null); setAttempt((value) => value + 1); };
+  const changeLanguage = (next: 'english' | 'pidgin') => {
+    if (next === 'pidgin' && language === 'pidgin') { retry(); return; }
+    setFailure(null); setLanguage(next);
+  };
+  return { language, setLanguage: changeLanguage, retry, translated, display: language === 'pidgin' && translated ? translated : source, loading,
+    error: language === 'pidgin' && !user && source ? 'Sign in again to translate this result.' : error };
 }

@@ -776,3 +776,57 @@ test('NiMet outlook renders seasonal predictions inside Farm Guide and retries a
   } finally {globalThis.fetch=originalFetch;await mount.unmount();}
 });
 
+test('Pidgin retries after failure, preserves English, and refreshes when the assessment changes', async () => {
+  const originalFetch=globalThis.fetch;
+  const {usePidginAssessment}=await viteServer.ssrLoadModule('/src/data/usePidginAssessment.ts');
+  const {PidginAssessmentControls}=await viteServer.ssrLoadModule('/src/components/common/PidginAssessmentControls.tsx');
+  let calls=0;
+  globalThis.fetch=async(_url,init)=>{
+    calls++;
+    if(calls===1)return Response.json({error:{message:'Temporary translation failure'}},{status:503});
+    const sent=JSON.parse(init.body).assessment;
+    return Response.json({assessment:{...sent,summary:sent.summary==='Updated English result'?'Di new result dey here.':'Dis na di Pidgin result.'}});
+  };
+  const user={uid:'pidgin-retry-user',getIdToken:async()=> 'test-token'};
+  function Harness(){
+    const [source,setSource]=useState(mockAssessment);
+    const value=usePidginAssessment('scan-pidgin-retry',source);
+    return createElement('div',null,createElement('p',{'data-result':true},value.display.summary),createElement(PidginAssessmentControls,{language:value.language,onLanguageChange:value.setLanguage,onRetry:value.retry,loading:value.loading,error:value.error,text:value.translated?.summary??''}),createElement('button',{onClick:()=>setSource({...mockAssessment,summary:'Updated English result'})},'Update source'));
+  }
+  const mount=createMount(createElement(AuthContext.Provider,{value:{user}},createElement(Harness)));
+  const click=async(label)=>{const target=[...mount.host.querySelectorAll('button')].find(x=>x.textContent===label);assert.ok(target,label);await act(async()=>target.dispatchEvent(new browserWindow.MouseEvent('click',{bubbles:true})));await act(async()=>delay(30));};
+  try{
+    await mount.render();await click('Nigerian Pidgin');
+    assert.match(mount.host.textContent,/Temporary translation failure/);
+    assert.equal(mount.host.querySelector('[data-result]').textContent,mockAssessment.summary);
+    await click('Retry Pidgin translation');
+    assert.equal(mount.host.querySelector('[data-result]').textContent,'Dis na di Pidgin result.');
+    assert.equal(calls,2);
+    await click('English');assert.equal(mount.host.querySelector('[data-result]').textContent,mockAssessment.summary);
+    await click('Nigerian Pidgin');assert.equal(calls,2,'Reuse only an identical assessment');
+    await click('Update source');assert.equal(calls,3);assert.equal(mount.host.querySelector('[data-result]').textContent,'Di new result dey here.');
+  }finally{globalThis.fetch=originalFetch;await mount.unmount();}
+});
+
+test('Pidgin audio reads the translated text with an English voice and supports pause, resume and stop', async () => {
+  const {PidginAssessmentControls}=await viteServer.ssrLoadModule('/src/components/common/PidginAssessmentControls.tsx');
+  const oldSpeech=Object.getOwnPropertyDescriptor(browserWindow,'speechSynthesis');
+  const oldUtterance=Object.getOwnPropertyDescriptor(browserWindow,'SpeechSynthesisUtterance');
+  let utterance; let canceled=0;
+  const voice={lang:'en-NG',name:'Nigerian English'};
+  Object.defineProperty(browserWindow,'SpeechSynthesisUtterance',{configurable:true,value:class{constructor(text){this.text=text;}}});
+  Object.defineProperty(browserWindow,'speechSynthesis',{configurable:true,value:{getVoices:()=>[voice],cancel:()=>canceled++,speak:(value)=>{utterance=value;value.onstart();},pause:()=>utterance.onpause(),resume:()=>utterance.onresume()}});
+  const mount=createMount(createElement(PidginAssessmentControls,{language:'pidgin',onLanguageChange:()=>{},text:'Dis leaf get yellow mark.'}));
+  const click=async(label)=>{const target=[...mount.host.querySelectorAll('button')].find(x=>x.textContent===label||x.getAttribute('aria-label')===label);assert.ok(target);assert.equal(target.disabled,false);await act(async()=>target.dispatchEvent(new browserWindow.MouseEvent('click',{bubbles:true})));};
+  try{
+    await mount.render();await click('Listen in Pidgin');
+    assert.equal(utterance.text,'Dis leaf get yellow mark.');assert.equal(utterance.voice,voice);
+    assert.match(mount.host.textContent,/English voice/);
+    await click('Pause');await click('Resume');await click('Stop Pidgin speech');
+    assert.ok(canceled>0);assert.match(mount.host.textContent,/Listen in Pidgin/);
+  }finally{
+    await mount.unmount();
+    if(oldSpeech)Object.defineProperty(browserWindow,'speechSynthesis',oldSpeech);else delete browserWindow.speechSynthesis;
+    if(oldUtterance)Object.defineProperty(browserWindow,'SpeechSynthesisUtterance',oldUtterance);else delete browserWindow.SpeechSynthesisUtterance;
+  }
+});

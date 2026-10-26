@@ -37,7 +37,7 @@ export const ScanDetailsScreen: React.FC = () => {
   const scan = scans.find((item) => item.id === id);
   const diagnosis = scan?.diagnosis;
 
-  const { language, setLanguage, translated, display: assessment, loading: translationLoading, error: translationError } = usePidginAssessment(scan?.id, scan?.assessment);
+  const { language, setLanguage, translated, display: assessment, loading: translationLoading, error: translationError, retry: retryTranslation } = usePidginAssessment(scan?.id, scan?.assessment);
   const isSampleScan = Boolean(scan && /^scan-[1-4]$/.test(scan.id));
   const canCheckCrop = Boolean(scan && !scan.assessment && !diagnosis
     && ['failed', 'pending', 'processing', 'unavailable'].includes(scan.assessmentStatus ?? 'unavailable'));
@@ -312,7 +312,7 @@ export const ScanDetailsScreen: React.FC = () => {
 
             {assessment && (
               <div className="bg-[#1F2B25] p-3.5 rounded-xl border border-[#273B30] flex flex-col gap-3">
-                <PidginAssessmentControls language={language} onLanguageChange={setLanguage} loading={translationLoading} error={translationError}
+                <PidginAssessmentControls language={language} onLanguageChange={setLanguage} loading={translationLoading} error={translationError} onRetry={retryTranslation}
                   text={language === 'pidgin' && translated ? [assessment.summary, assessment.confidenceReason, ...assessment.observedSymptoms, ...assessment.possibleCauses.flatMap((cause) => [cause.name, cause.explanation]), ...assessment.recommendedActions, ...assessment.preventionTips, assessment.whenToSeekHelp, ...assessment.limitations, assessment.disclaimer].join('. ') : ''} />
                 <div>
                   <span className="text-[11px] font-bold text-[#FF8A32] block mb-0.5">{assessment.status === 'inconclusive' ? 'Not sure yet' : 'Crop check from your photo'}</span>

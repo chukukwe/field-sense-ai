@@ -5,22 +5,23 @@ import type { SeasonalRainfallResult } from '../../../shared/seasonalRainfall';
 
 export function FarmGuideRainfall({ stateId, lgaId, areaName }: { stateId: number; lgaId: number; areaName: string }) {
   const { user } = useAuth();
-  const year = Number(new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: 'Africa/Lagos' }).format(new Date()));
-  const [result, setResult] = useState<SeasonalRainfallResult | null>(null);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [year] = useState(() => Number(new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: 'Africa/Lagos' }).format(new Date())));
   const [retry, setRetry] = useState(0);
+  const key = `${stateId}-${lgaId}-${year}-${retry}-${user?.uid ?? ''}`;
+  const [snapshot, setSnapshot] = useState<{key:string;result:SeasonalRainfallResult | null;status:'ready'|'error'} | null>(null);
+  const result = snapshot?.key === key ? snapshot.result : null;
+  const status = !user ? 'error' : snapshot?.key === key ? snapshot.status : 'loading';
   useEffect(() => {
     const controller = new AbortController();
-    setResult(null); setStatus('loading');
-    if (!user) { setStatus('error'); return () => controller.abort(); }
+    if (!user) return () => controller.abort();
     void (async () => {
       const idToken = await user.getIdToken();
       if (controller.signal.aborted) return;
       const data = await fetchSeasonalRainfall({ stateId, lgaId, year, idToken, signal: controller.signal });
-      if (!controller.signal.aborted) { setResult(data); setStatus('ready'); }
-    })().catch(() => { if (!controller.signal.aborted) setStatus('error'); });
+      if (!controller.signal.aborted) setSnapshot({key,result:data,status:'ready'});
+    })().catch(() => { if (!controller.signal.aborted) setSnapshot({key,result:null,status:'error'}); });
     return () => controller.abort();
-  }, [stateId, lgaId, year, retry, user]);
+  }, [stateId, lgaId, year, key, user]);
   const record = result?.status === 'available' ? result.record : null;
   return <section className="rounded-2xl border border-[#235840] bg-[#19392B] p-4" aria-label="NiMet seasonal rainfall outlook" aria-live="polite">
     <h2 className="text-sm font-bold text-white">NiMet seasonal outlook · {year}</h2>

@@ -163,7 +163,7 @@ function safeResponseOriginHint(response: Response): string {
   return server ? 'other_server_header' : 'unavailable';
 }
 
-function createDiagnosticFetch(fetchImpl: typeof fetch, requestId: string, model: string): typeof fetch {
+function createDiagnosticFetch(fetchImpl: typeof fetch, requestId: string, model: string, phase = 'generate_content'): typeof fetch {
   return async (input, init) => {
     const startedAt = performance.now();
     for (let attempt = 1; ; attempt += 1) {
@@ -172,7 +172,7 @@ function createDiagnosticFetch(fetchImpl: typeof fetch, requestId: string, model
       event: 'gemini_http_response_received',
       requestId,
       model: safeGeminiModelLabel(model),
-      phase: 'generate_content',
+      phase,
       httpStatus: response.status,
       responseOriginHint: safeResponseOriginHint(response),
       viaHeaderPresent: response.headers.has('via'),
@@ -238,16 +238,17 @@ const pidginTranslationSchema = {
   required: ['summary', 'confidenceReason', 'observedSymptoms', 'possibleCauses', 'recommendedActions', 'preventionTips', 'whenToSeekHelp', 'limitations', 'disclaimer'],
 };
 
-export async function translateAssessmentToPidgin(assessment: CropAssessmentResult, apiKey: string, model: string): Promise<CropAssessmentResult> {
-  const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 45_000, retryOptions: { attempts: 1 } } });
-  const prompt = `Translate this crop assessment into clear, natural Nigerian Pidgin for a farmer. Keep the same meaning and uncertainty. Do not add advice or remove any point. Keep crop names, disease names, every number, unit, quantity, concentration, waiting period and safety warning unchanged. Return only the translated text fields in the exact JSON shape requested. Do not translate status, confidence labels, crop identification, or cause likelihood; those are kept from the English record.\n\nEnglish assessment JSON:\n${JSON.stringify({
+export async function translateAssessmentToPidgin(assessment: CropAssessmentResult, apiKey: string, model: string, fetchImpl: typeof fetch = globalThis.fetch): Promise<CropAssessmentResult> {
+  const startedAt = performance.now();
+  const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 90_000, retryOptions: { attempts: 1 }, fetch: createDiagnosticFetch(fetchImpl, 'pidgin-translation', model, 'translate_pidgin') } });
+  const prompt = `Translate this crop assessment into clear, natural Nigerian Pidgin for a farmer. Keep the same meaning and uncertainty. Do not add advice or remove any point. Preserve the exact order and count of items in every list. Write short, clear sentences. Keep summary under 800 characters, cause names under 120, cause explanations and confidenceReason and whenToSeekHelp under 500, each list item under 400, and disclaimer under 300. Return Nigerian Pidgin rather than unchanged English. Keep crop names, disease names, every number, unit, quantity, concentration, waiting period and safety warning unchanged. Return only the translated text fields in the exact JSON shape requested. Do not translate status, confidence labels, crop identification, or cause likelihood; those are kept from the English record.\n\nEnglish assessment JSON:\n${JSON.stringify({
     summary: assessment.summary, confidenceReason: assessment.confidenceReason, observedSymptoms: assessment.observedSymptoms,
     possibleCauses: assessment.possibleCauses.map(({ name, explanation }) => ({ name, explanation })),
     recommendedActions: assessment.recommendedActions, preventionTips: assessment.preventionTips,
     whenToSeekHelp: assessment.whenToSeekHelp, limitations: assessment.limitations, disclaimer: assessment.disclaimer,
   })}`;
   try {
-    const response = await ai.models.generateContent({ model, contents: prompt, config: { responseMimeType: 'application/json', responseSchema: pidginTranslationSchema, maxOutputTokens: 2048 } });
+    const response = await ai.models.generateContent({ model, contents: prompt, config: { responseMimeType: 'application/json', responseSchema: pidginTranslationSchema, maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } });
     if (!response.text) throw new Error('empty');
     const translated = JSON.parse(response.text) as Record<string, unknown>;
     const sameListLength = (key: string, original: string[]) => Array.isArray(translated[key]) && translated[key].length === original.length && translated[key].every((item) => typeof item === 'string');
@@ -266,7 +267,7 @@ export async function translateAssessmentToPidgin(assessment: CropAssessmentResu
       summary: translated.summary,
       confidenceReason: translated.confidenceReason,
       observedSymptoms: translated.observedSymptoms as string[],
-      possibleCauses: (translated.possibleCauses as Array<{ name: string; explanation: string }>).map((cause, index) => ({ ...assessment.possibleCauses[index]!, ...cause })),
+      possibleCauses: (translated.possibleCauses as Array<{ name: string; explanation: string }>).map((cause, index) => ({ ...assessment.possibleCauses[index]!, name: cause.name, explanation: cause.explanation })),
       recommendedActions: translated.recommendedActions as string[],
       preventionTips: translated.preventionTips as string[],
       whenToSeekHelp: translated.whenToSeekHelp,
@@ -277,7 +278,10 @@ export async function translateAssessmentToPidgin(assessment: CropAssessmentResu
     return translatedResult;
   } catch (error) {
     if (error instanceof ProviderError) throw error;
-    const status = typeof error === 'object' && error !== null && 'status' in error ? Number((error as { status: unknown }).status) : 0;
+    const failure = logGeminiFailure(error, startedAt, 'pidgin-translation', model, 'translate_pidgin');
+    const status = failure.httpStatus ?? 0;
+    if (status === 408 || status === 504 || failure.category === 'timeout') throw new ProviderError('TRANSLATION_TIMEOUT', 504, 'Pidgin translation took too long. Try again. Your English result is still available.');
+    if (status === 503) throw new ProviderError('TRANSLATION_UNAVAILABLE', 503, 'Pidgin translation is temporarily unavailable. Try again later. Your English result is still available.');
     if (status === 429) throw new ProviderError('GEMINI_QUOTA', 429, 'Pidgin translation is busy. Your English result is still available.');
     throw new ProviderError('TRANSLATION_UNAVAILABLE', 502, 'Pidgin translation could not be loaded. Your English result is still available.');
   }

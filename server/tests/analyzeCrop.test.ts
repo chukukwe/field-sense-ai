@@ -4,7 +4,7 @@ import request from 'supertest';
 import sharp from 'sharp';
 import type { CropAssessmentResult } from '../src/assessmentSchema.js';
 import { createApp, ProviderError, resolveRateLimitClientKey, shouldTrustRenderEdgeClientIp, type AnalyzeDependencies } from '../src/app.js';
-import { assessWithGemini, classifyGeminiFailure, mapGeminiProviderFailure, parseGeminiResponseText, preservesNumbers } from '../src/gemini.js';
+import { assessWithGemini, translateAssessmentToPidgin as translateWithGemini, classifyGeminiFailure, mapGeminiProviderFailure, parseGeminiResponseText, preservesNumbers } from '../src/gemini.js';
 
 const png = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#30a060' } }).png().toBuffer();
 const assessment: CropAssessmentResult = {
@@ -762,4 +762,34 @@ describe('Pidgin translation safety check', () => {
     assert.equal(preservesNumbers(source, { ...source, summary: 'Check again in 48 hours.' }), true);
     assert.equal(preservesNumbers(source, { ...source, summary: 'Check again in 24 hours.' }), false);
   });
+});
+
+describe('Pidgin provider translation', () => {
+  it('uses low thinking and separate client/provider deadlines while preserving classifications', async () => {
+    const source = JSON.stringify(assessment);
+    const result = await translateWithGemini(assessment, 'private-test-key', 'gemini-3.8-flash', async (_url, init) => {
+      const payload = JSON.parse(String(init?.body));
+      assert.equal(payload.generationConfig.thinkingConfig.thinkingLevel, 'LOW');
+      assert.equal(payload.generationConfig.maxOutputTokens, 4096);
+      assert.equal(new Headers(init?.headers).get('x-server-timeout'), '90');
+      return Response.json({candidates:[{content:{role:'model',parts:[{text:JSON.stringify({...assessment, summary:'Di leaf get yellow marks, but we no fit confirm wetin cause am.',possibleCauses:assessment.possibleCauses.map(cause=>({...cause,likelihood:'more_likely'}))})}]}}]});
+    });
+    assert.notEqual(result.summary, assessment.summary);
+    assert.equal(result.status, assessment.status);
+    assert.equal(result.confidence, assessment.confidence);
+    assert.equal(result.possibleCauses[0]?.likelihood, assessment.possibleCauses[0]?.likelihood);
+    assert.equal(JSON.stringify(assessment), source);
+  });
+  it('rejects dropped advice and changed quantities', async () => {
+    const source = {...assessment,recommendedActions:['Check 3 nearby plants.']};
+    for (const actions of [[], ['Check 8 nearby plants.']]) {
+      await assert.rejects(translateWithGemini(source,'test-key','gemini-3.8-flash',async()=>Response.json({candidates:[{content:{parts:[{text:JSON.stringify({...source,recommendedActions:actions})}]}}]})),(error:unknown)=>error instanceof ProviderError && error.code==='INVALID_TRANSLATION');
+    }
+  });
+});
+
+it('reports a Pidgin provider timeout as retryable while keeping the English assessment intact', async () => {
+  const source = JSON.stringify(assessment);
+  await assert.rejects(translateWithGemini(assessment,'test-key','gemini-3.8-flash',async()=>Response.json({error:{code:504,status:'DEADLINE_EXCEEDED'}},{status:504})),(error:unknown)=>error instanceof ProviderError && error.code==='TRANSLATION_TIMEOUT' && error.status===504 && error.retryable);
+  assert.equal(JSON.stringify(assessment),source);
 });

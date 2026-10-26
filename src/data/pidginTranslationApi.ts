@@ -2,14 +2,14 @@ import type { CropAssessment } from '../types.js';
 
 const apiBase = (import.meta.env?.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 
-export async function translateAssessmentToPidgin(assessment: CropAssessment, idToken: string, fetcher: typeof fetch = fetch): Promise<CropAssessment> {
+export async function translateAssessmentToPidgin(assessment: CropAssessment, idToken: string, fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<CropAssessment> {
   let response: Response;
   try {
     response = await fetcher(`${apiBase}/api/assessment/translate-pidgin`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ assessment }),
-      signal: AbortSignal.timeout(45_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(110_000)]) : AbortSignal.timeout(110_000),
     });
   } catch {
     throw new Error('Pidgin translation is not available right now. Your English result is still here.');
