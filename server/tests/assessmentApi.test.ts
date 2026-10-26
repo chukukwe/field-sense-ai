@@ -173,8 +173,10 @@ describe('frontend assessment API helper', () => {
     assert.equal(octoberPlanting.some((entry) => entry.crop === 'Cassava'), false);
     assert.ok(octoberPlanting.every((entry) => entry.status === 'source_reviewed'));
     const ambiguous = farmGuideData.locations.find((item) => item.name === 'Kankara');
-    assert.ok(ambiguous?.needsReview);
-    assert.deepEqual(getReviewedCalendarForLocation(ambiguous.id, 7, 'plant'), []);
+    assert.ok(ambiguous);
+    assert.equal(ambiguous.needsReview, false);
+    assert.equal(ambiguous.zoneId, 5);
+    assert.ok(getReviewedCalendarForLocation(ambiguous.id, 7, 'plant').some((entry) => entry.crop === 'Maize'));
   });
 
   it('treats an intermediary 504 response without JSON as a retryable timeout', async () => {
@@ -254,7 +256,7 @@ describe('Farm Guide planning conditions', () => {
 });
 
 describe('Farm Guide published evidence gates', () => {
-  it('matches explicit NAERLS exceptions and keeps ambiguous source names unresolved', () => {
+  it('matches NAERLS exceptions and retains provenance for resolved interpretations', () => {
     const find = (state: string, lga: string) => {
       const stateId = farmGuideData.states.find((item) => item.name === state)?.id;
       const location = farmGuideData.locations.find((item) => item.stateId === stateId && item.name === lga);
@@ -266,10 +268,19 @@ describe('Farm Guide published evidence gates', () => {
     assert.equal(find('Yobe', 'Nguru').zoneId, 7);
     assert.equal(find('Plateau', 'Jos North').zoneId, 8);
     assert.equal(find('Federal Capital Territory', 'Gwagwalada').zoneId, 4);
-    for (const [state,lga] of [['Katsina','Kankara'],['Kwara','Kaiama'],['Osun','Ife East'],['Ebonyi','Izzi'],['Anambra','Ayamelum']]) {
-      const location=find(state!,lga!); assert.equal(location.needsReview,true);
-      for(let month=1;month<=12;month++) assert.deepEqual(getReviewedCalendarForLocation(location.id,month,'plant'),[]);
+    for (const [state,lga,zone] of [['Katsina','Kankara',5],['Katsina','Kankia',6],['Kwara','Kaiama',5],['Osun','Ife East',2],['Ebonyi','Izzi',3],['Anambra','Ayamelum',3]] as const) {
+      const location=find(state,lga); assert.equal(location.needsReview,false); assert.equal(location.zoneId,zone);
+      assert.ok(location.zoneReviewNote && location.zoneEvidence?.length);
     }
+    assert.equal(find('Anambra','Ayamelum').zoneReviewMethod,'external_inference');
+    assert.equal(find('Osun','Ife East').zoneReviewMethod,'corroborated_interpretation');
+    const birniwa=find('Jigawa','Birniwa'); assert.deepEqual(birniwa.aliases,['Biriniwa']); assert.equal(birniwa.zoneId,7);
+    // Keep the uncertainty gate effective for any future unresolved record.
+    const prior=birniwa.needsReview;
+    try { birniwa.needsReview=true; assert.deepEqual(getReviewedCalendarForLocation(birniwa.id,7,'plant'),[]); }
+    finally { birniwa.needsReview=prior; }
+    assert.equal(farmGuideData.locations.length,774);
+    assert.equal(new Set(farmGuideData.locations.map((item)=>item.id)).size,774);
   });
   it('publishes only traceable windows and preserves partial-month conditions', () => {
     const northern=getFarmGuideCalendarEntries(5,6,'plant').find((entry)=>entry.crop==='Maize');

@@ -55,6 +55,12 @@ const AreaPlan: React.FC<{
         <p className="mt-2 text-[11px] leading-relaxed text-[#D1D5DB]">This is an LGA-level classification from published guidance, not a survey of your farm. Soil, rainfall and drainage still vary locally.</p>
         {lga.needsReview && <p className="mt-2 text-[11px] text-[#FFD29D]">The published table is unclear for this LGA. Zone-based planting dates are withheld until it is clarified.</p>}
         {lga.zoneSource && <a href={lga.zoneSource} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-[11px] text-[#A7F3D0] underline">NAERLS zone classification source ↗</a>}
+        {lga.zoneReviewMethod && <details className="mt-3 rounded-xl bg-[#202321] p-3 text-[11px] text-[#D1D5DB]">
+          <summary className="cursor-pointer font-semibold text-[#A7F3D0]">How this zone was matched</summary>
+          <p className="mt-2 leading-relaxed">{lga.zoneReviewNote}</p>
+          {(lga.zoneReviewMethod === 'corroborated_interpretation' || lga.zoneReviewMethod === 'external_inference') && <p className="mt-2 text-[#FFD29D]">This is a corroborated area estimate, not a direct NAERLS statement covering every farm.</p>}
+          {lga.zoneEvidence?.map((evidence) => <a key={evidence.url} href={evidence.url} target="_blank" rel="noopener noreferrer" className="mt-2 block text-[#A7F3D0] underline">{evidence.title} ↗</a>)}
+        </details>}
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="text-xs font-semibold text-white">Planning month<select className={fieldClass} value={month} onChange={(event) => { const next = new URLSearchParams(params); next.set('month', event.target.value); setParams(next, { replace: true }); setOpenCardKey(null); }}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}{index + 1 === getLagosMonth() ? ' · current month' : ''}</option>)}</select></label>
           <label className="text-xs font-semibold text-white">Water supply<select className={fieldClass} value={preferences.water} onChange={(event) => setPreferences((old) => ({ ...old, water: event.target.value as WaterSupply }))}><option value="rainfall">Rainfall only</option><option value="irrigation">Reliable irrigation</option></select></label>

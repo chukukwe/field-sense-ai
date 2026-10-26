@@ -9,22 +9,11 @@ Prepared 26 October 2026. No independent agronomist approval has been obtained. 
 - `src/data/farmGuideReviewedCalendar.ts`: the replacement published windows for maize and groundnut, including partial-month wording, variety and water requirements. No reviewed harvest dates are supplied.
 - `src/data/farmGuidePlanning.ts`: general care text for cassava, maize, plantain and okra.
 
-## Location questions needing clarification
+## Resolved location questions
 
-| State | Database LGAs held for clarification | Problem in the NAERLS source |
-| --- | --- | --- |
-| Jigawa | Biriniwa; Malam Madori | Source spells these Birniwa and Malam-Maduri. Confirm identities and zones. |
-| Katsina | Kankara; Kankia | Source names Kankari; do not guess which LGA is meant. |
-| Zamfara | Tsafe | Source names Tsare. Confirm whether this refers to Tsafe. |
-| Gombe | Shongom; Billiri | Source names Shangom and Billri. Confirm identities. |
-| Kwara | Kaiama | Source names Kalama. Confirm whether this refers to Kaiama. |
-| Osun | Atakunmosa East; Ife Central; Ife East; Ife North; Ife South | Source names Atakunmasa-East and Ife-Osun. Clarify the intended administrative areas. |
-| Enugu | Aninri | Source names Aniri. Confirm identity. |
-| Anambra | Ayamelum | Listed as an exception without a replacement zone; source spelling is Aghamelum. |
-| Ebonyi | Izzi; Ishielu; Ohaukwu | Listed as exceptions without replacement zones. |
-| Cross River | Bekwarra | Source names Bekwara. Confirm identity. |
+The previous 19 held records have been resolved. See [the resolution supplement](farm-guide-location-resolutions.md) and the updated audit CSV. Source interpretation and external inference remain distinct from direct source matches.
 
-All 19 locations keep an unresolved flag and receive no zone-based planting recommendations. A source match for the other 755 LGAs is not proof that every farm in that LGA has identical conditions. Coastal areas are classified only at the broad Humid Forest level supported by NAERLS; the app no longer guesses rainforest/swamp/mangrove subzones.
+Independent review should pay particular attention to the Ife group expansion, Kankara/Kankia distinction, ecological transition areas, and the extrapolation from sampled communities in Ayamelum and Ebonyi. No whole-farm boundary validation has been performed. Original IDs are stable and Biriniwa is retained as an alias for Birniwa.
 
 ## Calendar sign-off checklist
 

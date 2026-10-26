@@ -4,7 +4,7 @@
 import { reviewedCalendar } from './farmGuideReviewedCalendar.js';
 export interface FarmGuideData {
   states: Array<{ id: number; name: string }>;
-  locations: Array<{ id: number; stateId: number; name: string; zoneId: number; needsReview: boolean; zoneSource?: string; zoneReviewedOn?: string; zoneReviewNote?: string }>;
+  locations: Array<{ id: number; stateId: number; name: string; zoneId: number; needsReview: boolean; zoneSource?: string; zoneReviewedOn?: string; zoneReviewNote?: string; aliases?: string[]; zoneReviewMethod?: 'name_normalized' | 'source_default' | 'corroborated_interpretation' | 'external_inference'; zoneEvidence?: Array<{ title: string; url: string }> }>;
   zones: Array<{ id: number; name: string }>;
   crops: Array<{ id: number; name: string }>;
   calendar: Array<{
@@ -924,10 +924,18 @@ export const farmGuideData: FarmGuideData = {
       "id": 76,
       "stateId": 4,
       "name": "Ayamelum",
-      "zoneId": 2,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "zoneId": 3,
+      "needsReview": false,
+      "zoneReviewNote": "NAERLS lists an exception but gives no replacement zone. A study in Ifite-Ogwari describes derived savanna with rainforest patches. Derived Savanna is a corroborated area estimate, not an explicit NAERLS assignment or a whole-LGA survey.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "external_inference",
+      "zoneEvidence": [
+        {
+          "title": "Nwosu et al. (2024), Materials and methods, p. 222",
+          "url": "https://journals.unizik.edu.ng/index.php/faic/article/download/3493/2820/8082"
+        }
+      ]
     },
     {
       "id": 77,
@@ -1893,10 +1901,18 @@ export const farmGuideData: FarmGuideData = {
       "id": 173,
       "stateId": 9,
       "name": "Bekwarra",
-      "zoneId": 2,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "zoneId": 3,
+      "needsReview": false,
+      "zoneReviewNote": "Bekwara is normalized to INEC-recognized Bekwarra; NAERLS assigns the exception to Derived Savanna.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "name_normalized",
+      "zoneEvidence": [
+        {
+          "title": "INEC: Bekwarra LGA office",
+          "url": "https://cvr.inecnigeria.org/locator/viewCentre/1181"
+        }
+      ]
     },
     {
       "id": 174,
@@ -2352,10 +2368,18 @@ export const farmGuideData: FarmGuideData = {
       "id": 219,
       "stateId": 11,
       "name": "Ishielu",
-      "zoneId": 2,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "zoneId": 3,
+      "needsReview": false,
+      "zoneReviewNote": "NAERLS gives no replacement zone. Ogbodo Table 1a places sampled communities in this LGA under Derived Savanna. The assignment is externally corroborated and is not a whole-LGA boundary survey.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "corroborated_interpretation",
+      "zoneEvidence": [
+        {
+          "title": "Ogbodo (2013), Table 1a, p. 171",
+          "url": "https://soilsjournalnigeria.com/download.php?id=107"
+        }
+      ]
     },
     {
       "id": 220,
@@ -2371,10 +2395,18 @@ export const farmGuideData: FarmGuideData = {
       "id": 221,
       "stateId": 11,
       "name": "Izzi",
-      "zoneId": 2,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "zoneId": 3,
+      "needsReview": false,
+      "zoneReviewNote": "NAERLS gives no replacement zone. Ogbodo Table 1a places sampled communities in this LGA under Derived Savanna. The assignment is externally corroborated and is not a whole-LGA boundary survey.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "corroborated_interpretation",
+      "zoneEvidence": [
+        {
+          "title": "Ogbodo (2013), Table 1a, p. 171",
+          "url": "https://soilsjournalnigeria.com/download.php?id=107"
+        }
+      ]
     },
     {
       "id": 222,
@@ -2390,10 +2422,18 @@ export const farmGuideData: FarmGuideData = {
       "id": 223,
       "stateId": 11,
       "name": "Ohaukwu",
-      "zoneId": 2,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "zoneId": 3,
+      "needsReview": false,
+      "zoneReviewNote": "NAERLS gives no replacement zone. Ogbodo Table 1a places sampled communities in this LGA under Derived Savanna. The assignment is externally corroborated and is not a whole-LGA boundary survey.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "corroborated_interpretation",
+      "zoneEvidence": [
+        {
+          "title": "Ogbodo (2013), Table 1a, p. 171",
+          "url": "https://soilsjournalnigeria.com/download.php?id=107"
+        }
+      ]
     },
     {
       "id": 224,
@@ -2750,9 +2790,17 @@ export const farmGuideData: FarmGuideData = {
       "stateId": 14,
       "name": "Aninri",
       "zoneId": 2,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "needsReview": false,
+      "zoneReviewNote": "Aniri is normalized to government-recognized Aninri; NAERLS assigns the exception to Humid Forest.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "name_normalized",
+      "zoneEvidence": [
+        {
+          "title": "Enugu government LGA directory",
+          "url": "https://enugustate.gov.ng/lgas/"
+        }
+      ]
     },
     {
       "id": 260,
@@ -2998,10 +3046,18 @@ export const farmGuideData: FarmGuideData = {
       "id": 284,
       "stateId": 16,
       "name": "Billiri",
-      "zoneId": 5,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "zoneId": 4,
+      "needsReview": false,
+      "zoneReviewNote": "Billri is normalized to Billiri, confirmed in the government directory; NAERLS assigns the exception to Southern Guinea Savanna.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "name_normalized",
+      "zoneEvidence": [
+        {
+          "title": "Gombe government LGA directory",
+          "url": "https://gombestate.gov.ng/"
+        }
+      ]
     },
     {
       "id": 285,
@@ -3067,10 +3123,18 @@ export const farmGuideData: FarmGuideData = {
       "id": 291,
       "stateId": 16,
       "name": "Shongom",
-      "zoneId": 5,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "zoneId": 4,
+      "needsReview": false,
+      "zoneReviewNote": "Shangom is normalized to Shongom, confirmed in the government directory; NAERLS assigns the exception to Southern Guinea Savanna.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "name_normalized",
+      "zoneEvidence": [
+        {
+          "title": "Gombe government LGA directory",
+          "url": "https://gombestate.gov.ng/"
+        }
+      ]
     },
     {
       "id": 292,
@@ -3375,11 +3439,22 @@ export const farmGuideData: FarmGuideData = {
     {
       "id": 322,
       "stateId": 18,
-      "name": "Biriniwa",
-      "zoneId": 6,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "name": "Birniwa",
+      "zoneId": 7,
+      "needsReview": false,
+      "zoneReviewNote": "NAERLS names Birniwa; the government MTEF uses Birniwa. The previous Biriniwa spelling is retained as an alias.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "aliases": [
+        "Biriniwa"
+      ],
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "name_normalized",
+      "zoneEvidence": [
+        {
+          "title": "Jigawa government 2026-2028 MTEF",
+          "url": "https://jigawastate.gov.ng/uploads/Jigawa%20State%20Government_2026-2028%20Medium%20Term%20Expenditure%20Framework%20%5BMTEF%5D.pdf"
+        }
+      ]
     },
     {
       "id": 323,
@@ -3555,10 +3630,18 @@ export const farmGuideData: FarmGuideData = {
       "id": 340,
       "stateId": 18,
       "name": "Malam Madori",
-      "zoneId": 6,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "zoneId": 7,
+      "needsReview": false,
+      "zoneReviewNote": "Malam-Maduri is normalized to the government name Malam Madori; NAERLS places this exception in Sahel Savanna.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "name_normalized",
+      "zoneEvidence": [
+        {
+          "title": "Jigawa government: Malam Madori council audit (2022)",
+          "url": "https://jigawastate.gov.ng/uploads/21.%20Malam%20Madori.pdf"
+        }
+      ]
     },
     {
       "id": 341,
@@ -4474,19 +4557,39 @@ export const farmGuideData: FarmGuideData = {
       "id": 432,
       "stateId": 21,
       "name": "Kankara",
-      "zoneId": 6,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "zoneId": 5,
+      "needsReview": false,
+      "zoneReviewNote": "Kankari is interpreted as Kankara: the study explicitly samples Kankara in Northern Guinea Savanna alongside the other NAERLS exceptions.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "corroborated_interpretation",
+      "zoneEvidence": [
+        {
+          "title": "Peter-Jerome et al. (2022), Study area",
+          "url": "https://onlinelibrary.wiley.com/doi/10.1155/2022/5111635"
+        }
+      ]
     },
     {
       "id": 433,
       "stateId": 21,
       "name": "Kankia",
       "zoneId": 6,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "needsReview": false,
+      "zoneReviewNote": "Kankia remains a separate LGA. With Kankari resolved to Kankara, Kankia follows the NAERLS Sudan Savanna default. Local ecological transitions remain possible.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "source_default",
+      "zoneEvidence": [
+        {
+          "title": "Peter-Jerome et al. (2022), Study area",
+          "url": "https://onlinelibrary.wiley.com/doi/10.1155/2022/5111635"
+        },
+        {
+          "title": "Katsina government education plan, separate Kankara and Kankia entries",
+          "url": "https://planipolis.iiep.unesco.org/sites/default/files/ressources/2010-09-nigeria-katsina-2011-2020.pdf"
+        }
+      ]
     },
     {
       "id": 434,
@@ -5153,9 +5256,17 @@ export const farmGuideData: FarmGuideData = {
       "stateId": 24,
       "name": "Kaiama",
       "zoneId": 5,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "needsReview": false,
+      "zoneReviewNote": "Kalama is interpreted as government-recognized Kaiama, matching the Northern Guinea exception in NAERLS.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "name_normalized",
+      "zoneEvidence": [
+        {
+          "title": "Kwara government LGA directory",
+          "url": "https://kwarastate.gov.ng/government/lgas/"
+        }
+      ]
     },
     {
       "id": 501,
@@ -6182,9 +6293,17 @@ export const farmGuideData: FarmGuideData = {
       "stateId": 30,
       "name": "Atakunmosa East",
       "zoneId": 2,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "needsReview": false,
+      "zoneReviewNote": "Atakunmasa-East is normalized to official Atakunmosa East; NAERLS assigns the exception to Humid Forest.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "name_normalized",
+      "zoneEvidence": [
+        {
+          "title": "Osun government: Atakunmosa East",
+          "url": "https://www.osunstate.gov.ng/atakunmosa-east-lg/"
+        }
+      ]
     },
     {
       "id": 604,
@@ -6271,36 +6390,68 @@ export const farmGuideData: FarmGuideData = {
       "stateId": 30,
       "name": "Ife Central",
       "zoneId": 2,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "needsReview": false,
+      "zoneReviewNote": "The Ife-Osun shorthand is interpreted as the four Ife LGAs. The cited study selected all four in its rainforest sample; it does not map every farm boundary.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "corroborated_interpretation",
+      "zoneEvidence": [
+        {
+          "title": "Omodara et al. (2023), sampling procedure",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10036664/"
+        }
+      ]
     },
     {
       "id": 613,
       "stateId": 30,
       "name": "Ife East",
       "zoneId": 2,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "needsReview": false,
+      "zoneReviewNote": "The Ife-Osun shorthand is interpreted as the four Ife LGAs. The cited study selected all four in its rainforest sample; it does not map every farm boundary.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "corroborated_interpretation",
+      "zoneEvidence": [
+        {
+          "title": "Omodara et al. (2023), sampling procedure",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10036664/"
+        }
+      ]
     },
     {
       "id": 614,
       "stateId": 30,
       "name": "Ife North",
       "zoneId": 2,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "needsReview": false,
+      "zoneReviewNote": "The Ife-Osun shorthand is interpreted as the four Ife LGAs. The cited study selected all four in its rainforest sample; it does not map every farm boundary.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "corroborated_interpretation",
+      "zoneEvidence": [
+        {
+          "title": "Omodara et al. (2023), sampling procedure",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10036664/"
+        }
+      ]
     },
     {
       "id": 615,
       "stateId": 30,
       "name": "Ife South",
       "zoneId": 2,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "needsReview": false,
+      "zoneReviewNote": "The Ife-Osun shorthand is interpreted as the four Ife LGAs. The cited study selected all four in its rainforest sample; it does not map every farm boundary.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "corroborated_interpretation",
+      "zoneEvidence": [
+        {
+          "title": "Omodara et al. (2023), sampling procedure",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10036664/"
+        }
+      ]
     },
     {
       "id": 616,
@@ -7876,10 +8027,18 @@ export const farmGuideData: FarmGuideData = {
       "id": 773,
       "stateId": 37,
       "name": "Tsafe",
-      "zoneId": 6,
-      "needsReview": true,
-      "zoneReviewNote": "The published source has an ambiguous spelling or an exception without a replacement zone. Zone-based dates are withheld.",
-      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en"
+      "zoneId": 5,
+      "needsReview": false,
+      "zoneReviewNote": "Tsare is interpreted as the government-recognized Tsafe LGA, matching the Northern Guinea exception in NAERLS. This is a spelling reconciliation, not a boundary survey.",
+      "zoneSource": "https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en",
+      "zoneReviewedOn": "2026-10-26",
+      "zoneReviewMethod": "name_normalized",
+      "zoneEvidence": [
+        {
+          "title": "Zamfara government: Tsafe LGA",
+          "url": "https://zamfara.gov.ng/elementor-319/"
+        }
+      ]
     },
     {
       "id": 774,

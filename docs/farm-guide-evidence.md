@@ -5,7 +5,7 @@ Updated 26 October 2026. Published-source checking is not independent agronomist
 ## Latest audit
 
 - All 774 location records were compared against the [NAERLS ecological-zone table](https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en), last updated May 2024.
-- 755 LGAs match a published classification; 309 zone assignments changed from the previous heuristic. The 19 ambiguous source entries are quarantined and cannot produce zone-based planting dates.
+- The initial pass matched 755 LGAs directly and corrected 309 heuristic zone assignments. The remaining 19 are now resolved using official spelling evidence, source-default logic and explicitly labelled research corroboration/inference. See the resolution supplement; this is not a whole-farm boundary survey.
 - Coastal classifications use the source's broad Humid Forest group. Rainforest/swamp/mangrove subzones are not inferred from a state or LGA name.
 - All 277 legacy calendar rows lacked traceable authoritative citations and production-method/variety scope. They remain in the raw dataset for audit but are not served to farmers as reviewed recommendations.
 - Replacement published planting windows currently cover maize and groundnut where the evidence supports the zone. Partial-month language is preserved. Variety, water and local conditions appear with every window.
@@ -31,4 +31,8 @@ The existing private NiMet key successfully returned the exact 2026 Eket record 
 
 ## Outstanding independent review
 
-Clarify the 19 ambiguous locations. Obtain crop-specific published windows for the remaining crops, resolve conflicting evidence, and obtain qualified local review and field validation. No recommendation is labelled agronomist-verified. A ready-to-share checklist is in the review pack; no third party has been contacted.
+Review the inference limits documented for the 19 resolved locations, particularly Ayamelum and the Ife/Ebonyi classifications. Obtain crop-specific published windows for the remaining crops, resolve conflicting evidence, and obtain qualified local review and field validation. No recommendation is labelled agronomist-verified. A ready-to-share checklist is in the review pack; no third party has been contacted.
+
+## Resolved LGA supplement
+
+[All 19 decisions and inspected evidence](farm-guide-location-resolutions.md). The location audit now distinguishes direct matches, name normalizations, source defaults, corroborated interpretations and external inference. All 774 IDs remain stable; Biriniwa is retained as an alias for Birniwa. No source inference is represented as an explicit NAERLS statement or independent expert sign-off.

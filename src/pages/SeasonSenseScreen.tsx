@@ -85,6 +85,7 @@ export const SeasonSenseScreen: React.FC = () => {
                 <p className="text-xs font-semibold text-white">{validLga.name}, {state?.name}</p>
                 <p className="mt-1 text-[11px] text-[#A1A7A3]">Published LGA farming-zone classification</p>
                 <p className="text-xs font-semibold text-white">{validLga.needsReview ? 'Zone not confirmed' : zone.name}</p>
+                {(validLga.zoneReviewMethod === 'corroborated_interpretation' || validLga.zoneReviewMethod === 'external_inference') && <p className="mt-1 text-[10px] text-[#FFD29D]">Corroborated area estimate from published research; local conditions may vary.</p>}
                 {validLga.needsReview && <p className="mt-1 text-[10px] leading-relaxed text-[#FFD29D]">The published source is unclear for this LGA. Zone-based planting dates will be withheld.</p>}
               </div>
             </div>
