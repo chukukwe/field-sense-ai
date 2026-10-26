@@ -4,7 +4,7 @@ import { ChevronDown, MapPin, Sprout } from 'lucide-react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { TopHeader } from '../components/common/TopHeader';
 import { farmGuideCropDetails } from '../data/farmGuideCropDetails';
-import { farmGuideData, getFarmGuideCalendarEntries, getFarmGuideLocation, getFarmGuideZone, type FarmGuideActivity } from '../data/farmGuideData';
+import { farmGuideData, getFarmGuideCalendarEntries, getReviewedCalendarForLocation, getFarmGuideLocation, getFarmGuideZone, type FarmGuideActivity } from '../data/farmGuideData';
 import { saveFarmGuideLocation } from '../data/farmGuideLocationStorage';
 import { cropCare, getLagosMonth, getPlanningMonth, getPlantingWindows, guideCheckedOn, guideSources, readGuidePreferences, saveGuidePreferences, type GuidePreferences, type WaterSupply } from '../data/farmGuidePlanning';
 
@@ -51,9 +51,10 @@ const AreaPlan: React.FC<{
           <div><p className="text-[11px] text-[#A1A7A3]">Your farm plan</p><h2 className="mt-1 text-base font-bold text-white">{lga.name}, {state.name}</h2></div>
           <button type="button" onClick={() => navigate(`/farm-guide/area?stateId=${state.id}&lgaId=${lga.id}`, { replace: true })} className="text-xs font-semibold text-[#1EB968]">Change area</button>
         </div>
-        <div className="mt-3 flex gap-2"><MapPin className="h-4 w-4 shrink-0 text-[#1EB968]" /><div><p className="text-[11px] text-[#A1A7A3]">Estimated farming zone</p><p className="text-xs font-semibold text-white">{zone.name}</p></div></div>
-        <p className="mt-2 text-[11px] leading-relaxed text-[#D1D5DB]">This is a broad area estimate. Farms in the same LGA can have different soil, rainfall and drainage.</p>
-        {lga.needsReview && <p className="mt-2 text-[11px] text-[#FFD29D]">This LGA’s zone assignment still needs local review.</p>}
+        <div className="mt-3 flex gap-2"><MapPin className="h-4 w-4 shrink-0 text-[#1EB968]" /><div><p className="text-[11px] text-[#A1A7A3]">Estimated farming zone</p><p className="text-xs font-semibold text-white">{lga.needsReview ? 'Zone not confirmed' : zone.name}</p></div></div>
+        <p className="mt-2 text-[11px] leading-relaxed text-[#D1D5DB]">This is an LGA-level classification from published guidance, not a survey of your farm. Soil, rainfall and drainage still vary locally.</p>
+        {lga.needsReview && <p className="mt-2 text-[11px] text-[#FFD29D]">The published table is unclear for this LGA. Zone-based planting dates are withheld until it is clarified.</p>}
+        {lga.zoneSource && <a href={lga.zoneSource} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-[11px] text-[#A7F3D0] underline">NAERLS zone classification source ↗</a>}
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="text-xs font-semibold text-white">Planning month<select className={fieldClass} value={month} onChange={(event) => { const next = new URLSearchParams(params); next.set('month', event.target.value); setParams(next, { replace: true }); setOpenCardKey(null); }}>{monthNames.map((name, index) => <option key={name} value={index + 1}>{name}{index + 1 === getLagosMonth() ? ' · current month' : ''}</option>)}</select></label>
           <label className="text-xs font-semibold text-white">Water supply<select className={fieldClass} value={preferences.water} onChange={(event) => setPreferences((old) => ({ ...old, water: event.target.value as WaterSupply }))}><option value="rainfall">Rainfall only</option><option value="irrigation">Reliable irrigation</option></select></label>
@@ -65,16 +66,16 @@ const AreaPlan: React.FC<{
 
       <section className="rounded-2xl border border-[#5C4930] bg-[#2E271C] p-4" aria-label="Before you plant">
         <h2 className="text-sm font-bold text-[#FFD29D]">Before you plant</h2>
-        <p className="mt-2 text-xs leading-relaxed text-[#E4D8C4]">Calendar dates are draft seasonal estimates, not a live weather forecast or a confirmed planting recommendation for your farm.</p>
+        <p className="mt-2 text-xs leading-relaxed text-[#E4D8C4]">Only source-reviewed planting windows are shown. They are general published guidance, not a current weather forecast or a confirmed recommendation for your field.</p>
         <p className="mt-2 text-xs leading-relaxed text-[#E4D8C4]">Check that rain or irrigation can support the crop, the ground drains well, and the variety suits your area. Confirm timing with a local farm adviser.</p>
       </section>
 
       <section className="flex flex-col gap-3" aria-label="Crop calendar">
-        <div><h2 className="text-sm font-bold text-white">Crop calendar · {monthNames[month - 1]}</h2><p className="mt-1 text-[11px] text-[#A1A7A3]">Use these windows for planning and local discussion. A missing entry does not mean a crop cannot grow here.</p></div>
-        <CropWindowList title={`Possible planting windows · ${monthNames[month - 1]}`} activity="plant" entries={getPlantingWindows(zone.id, month, preferences.water)} openCardKey={openCardKey} onToggle={setOpenCardKey} />
-        <CropWindowList title={`Typical harvest windows · ${monthNames[month - 1]}`} activity="harvest" entries={getFarmGuideCalendarEntries(zone.id, month, 'harvest')} openCardKey={openCardKey} onToggle={setOpenCardKey} />
-        <p className="text-[11px] text-[#A1A7A3]">Harvest windows describe regional patterns. Your planting date, variety and crop maturity determine when your field is ready.</p>
-        <CropWindowList title={`Plan ahead · ${monthNames[nextMonth - 1]}${month === 12 ? ' (next year)' : ''}`} activity="plant" entries={getPlantingWindows(zone.id, nextMonth, preferences.water)} openCardKey={openCardKey} onToggle={setOpenCardKey} />
+        <div><h2 className="text-sm font-bold text-white">Crop calendar · {monthNames[month - 1]}</h2><p className="mt-1 text-[11px] text-[#A1A7A3]">Reviewed date coverage currently includes maize and groundnut where sources support the zone. Dates for other crops are withheld pending review. A missing entry does not mean a crop cannot grow here.</p></div>
+        <CropWindowList title={`Possible planting windows · ${monthNames[month - 1]}`} activity="plant" entries={getPlantingWindows(zone.id, month, preferences.water, lga.id)} openCardKey={openCardKey} onToggle={setOpenCardKey} />
+        <CropWindowList title={`Typical harvest windows · ${monthNames[month - 1]}`} activity="harvest" entries={getReviewedCalendarForLocation(lga.id, month, 'harvest')} openCardKey={openCardKey} onToggle={setOpenCardKey} />
+        <p className="text-[11px] text-[#A1A7A3]">Unverified harvest dates are withheld. Use your actual planting date, variety and crop maturity to plan harvest with a local adviser.</p>
+        <CropWindowList title={`Plan ahead · ${monthNames[nextMonth - 1]}${month === 12 ? ' (next year)' : ''}`} activity="plant" entries={getPlantingWindows(zone.id, nextMonth, preferences.water, lga.id)} openCardKey={openCardKey} onToggle={setOpenCardKey} />
       </section>
 
       <section className={sectionClass} aria-label="Crop care guide">
@@ -111,14 +112,14 @@ const CropWindowList: React.FC<{
     return <article key={key} className="overflow-hidden rounded-2xl border border-[#323633] bg-[#292C2A]">
       <button type="button" aria-expanded={open} aria-controls={`crop-${key}`} onClick={() => onToggle(open ? null : key)} className="flex w-full items-center gap-3 p-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#1EB968]">
         {detail ? <img src={detail.image} alt={detail.imageAlt} className="h-16 w-16 shrink-0 rounded-xl object-cover" loading="lazy" /> : <Sprout className="h-6 w-6 text-[#A7F3D0]" />}
-        <span className="min-w-0 flex-1"><span className="block text-sm font-bold text-white">{entry.crop}</span><span className="mt-1 block text-[11px] text-[#A1A7A3]">{formatSeasonName(entry.seasonLabel)} · {entry.status === 'draft' ? 'Estimated window' : 'Source-reviewed window'}</span><span className="mt-1 block text-[10px] text-[#1EB968]">{open ? 'Hide crop details' : 'View crop details'}</span></span>
+        <span className="min-w-0 flex-1"><span className="block text-sm font-bold text-white">{entry.crop}</span><span className="mt-1 block text-[11px] text-[#A1A7A3]">{formatSeasonName(entry.seasonLabel)} · Source-reviewed window</span><span className="mt-1 block text-[10px] text-[#1EB968]">{open ? 'Hide crop details' : 'View crop details'}</span></span>
         <ChevronDown className={`h-4 w-4 text-[#A1A7A3] ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
       </button>
       <div id={`crop-${key}`} hidden={!open} className="border-t border-[#3B423E] p-4">
-        <p className="text-xs text-[#FFD29D]">Confirm this window locally before planting or harvesting.</p>
+        <p className="text-xs font-semibold text-[#A7F3D0]">{entry.window}</p><p className="mt-2 text-xs leading-relaxed text-[#D1D5DB]">{entry.conditions}</p><a href={entry.source} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-[11px] text-[#A7F3D0] underline">{entry.sourceTitle} ↗</a><p className="mt-1 text-[10px] text-[#A1A7A3]">{entry.sourceLocator}. Source checked {entry.reviewedOn}; local agronomist review is still needed.</p>
         {detail && <><p className="mt-2 text-xs text-[#D1D5DB]">{detail.about}</p><h4 className="mt-3 text-xs font-bold text-white">How to plant</h4><ul className="mt-2 list-disc space-y-2 pl-4 text-[11px] text-[#D1D5DB]">{detail.plantingNotes.map((note) => <li key={note}>{note}</li>)}</ul></>}
         <p className="mt-3 text-[11px] text-[#A1A7A3]">{entry.seasonLabel === 'dry_season' && activity === 'plant' ? 'This dry-season entry needs a dependable water plan. ' : ''}See the crop care guide below for available sources and review status.</p>
       </div>
     </article>;
-  }) : <p className={`${sectionClass} text-xs text-[#D1D5DB]`}>No matching crops are listed in the draft calendar for this window and water supply. Use the crop care guide and ask locally.</p>}
+  }) : <p className={`${sectionClass} text-xs text-[#D1D5DB]`}>No source-reviewed dates are available for this window, area and water supply. Use the crop care guide and ask locally; no date has been guessed.</p>}
 </section>;

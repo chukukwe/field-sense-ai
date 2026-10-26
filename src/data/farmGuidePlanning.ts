@@ -1,4 +1,4 @@
-import { getFarmGuideCalendarEntries } from './farmGuideData.js';
+import { getFarmGuideCalendarEntries, getReviewedCalendarForLocation } from './farmGuideData.js';
 
 export type WaterSupply = 'rainfall' | 'irrigation';
 export const guideCheckedOn = '25 October 2026';
@@ -65,8 +65,9 @@ export function getPlanningMonth(value: string | null, currentMonth = getLagosMo
   return currentMonth;
 }
 
-export function getPlantingWindows(zoneId: number, month: number, water: WaterSupply) {
-  return getFarmGuideCalendarEntries(zoneId, month, 'plant')
+export function getPlantingWindows(zoneId: number, month: number, water: WaterSupply, locationId?: number) {
+  const entries = locationId === undefined ? getFarmGuideCalendarEntries(zoneId, month, 'plant') : getReviewedCalendarForLocation(locationId, month, 'plant');
+  return entries
     .filter((entry) => water === 'irrigation' || entry.seasonLabel !== 'dry_season');
 }
 

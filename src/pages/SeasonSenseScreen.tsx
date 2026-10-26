@@ -39,7 +39,7 @@ export const SeasonSenseScreen: React.FC = () => {
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-[#A7F3D0]"><Sprout className="h-5 w-5" aria-hidden="true" /></span>
             <div className="min-w-0">
               <h2 className="mt-1 text-lg font-bold leading-tight text-white">Plan for your area</h2>
-              <p className="mt-1 text-xs leading-relaxed text-white/80">Choose your state and local government area. Farm Guide shows a broad farming-zone estimate, draft seasonal windows and crop care notes. Confirm local conditions before planting.</p>
+              <p className="mt-1 text-xs leading-relaxed text-white/80">Choose your state and local government area. Farm Guide shows a broad farming-zone estimate, source-reviewed seasonal windows and crop care notes. Confirm local conditions before planting.</p>
             </div>
           </div>
         </section>
@@ -83,9 +83,9 @@ export const SeasonSenseScreen: React.FC = () => {
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-[#A1A7A3]">Selected area</p>
                 <p className="text-xs font-semibold text-white">{validLga.name}, {state?.name}</p>
-                <p className="mt-1 text-[11px] text-[#A1A7A3]">Estimated farming zone · Approximate</p>
-                <p className="text-xs font-semibold text-white">{zone.name}</p>
-                {validLga.needsReview && <p className="mt-1 text-[10px] leading-relaxed text-[#FFD29D]">This LGA’s zone assignment needs local review.</p>}
+                <p className="mt-1 text-[11px] text-[#A1A7A3]">Published LGA farming-zone classification</p>
+                <p className="text-xs font-semibold text-white">{validLga.needsReview ? 'Zone not confirmed' : zone.name}</p>
+                {validLga.needsReview && <p className="mt-1 text-[10px] leading-relaxed text-[#FFD29D]">The published source is unclear for this LGA. Zone-based planting dates will be withheld.</p>}
               </div>
             </div>
           )}

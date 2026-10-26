@@ -8,7 +8,7 @@ import type { CropAssessment, ScanItem } from '../../src/types.js';
 import { updateScanAssessment } from '../../src/data/assessmentState.js';
 import { translateAssessmentToPidgin } from '../../src/data/pidginTranslationApi.js';
 import { getSeasonGuideEntry, seasonGuideAreas, type SeasonGuidePeriod } from '../../src/data/seasonGuide.js';
-import { farmGuideData, getFarmGuideCalendarEntries, getFarmGuideLocation, getFarmGuideLocations, getFarmGuideZone } from '../../src/data/farmGuideData.js';
+import { farmGuideData, getFarmGuideCalendarEntries, getFarmGuideLocation, getFarmGuideLocations, getFarmGuideZone, getReviewedCalendarForLocation } from '../../src/data/farmGuideData.js';
 
 const result: CropAssessment = {
   status: 'inconclusive', cropIdentification: 'unknown', observedSymptoms: [], possibleCauses: [],
@@ -154,7 +154,7 @@ describe('frontend assessment API helper', () => {
     assert.notEqual(wetEket.headline, dryKano.headline);
   });
 
-  it('maps a selected state and LGA to an approximate zone and only returns draft calendar data', () => {
+  it('uses a source-matched LGA zone and withholds unsupported legacy calendar dates', () => {
     assert.equal(farmGuideData.states.length, 37);
     assert.equal(farmGuideData.locations.length, 774);
 
@@ -164,13 +164,17 @@ describe('frontend assessment API helper', () => {
     assert.ok(eket);
     const location = getFarmGuideLocation(eket.id);
     assert.ok(location);
-    assert.equal(location.needsReview, true);
+    assert.equal(location.needsReview, false);
+    assert.match(location.zoneSource ?? '', /naerls/);
     const zone = getFarmGuideZone(location.zoneId);
-    assert.equal(zone?.name, 'Mangrove / Freshwater Swamp (coastal)');
+    assert.equal(zone?.name, 'Humid Forest (rainforest)');
 
     const octoberPlanting = getFarmGuideCalendarEntries(location.zoneId, 10, 'plant');
-    assert.ok(octoberPlanting.some((entry) => entry.crop === 'Cassava'));
-    assert.ok(octoberPlanting.every((entry) => entry.status === 'draft'));
+    assert.equal(octoberPlanting.some((entry) => entry.crop === 'Cassava'), false);
+    assert.ok(octoberPlanting.every((entry) => entry.status === 'source_reviewed'));
+    const ambiguous = farmGuideData.locations.find((item) => item.name === 'Kankara');
+    assert.ok(ambiguous?.needsReview);
+    assert.deepEqual(getReviewedCalendarForLocation(ambiguous.id, 7, 'plant'), []);
   });
 
   it('treats an intermediary 504 response without JSON as a retryable timeout', async () => {
@@ -246,5 +250,39 @@ describe('Farm Guide planning conditions', () => {
       assert.match(care.source.url, /^https:\/\//);
     }
     assert.ok(farmGuideData.calendar.every((entry) => entry.status === 'draft'));
+  });
+});
+
+describe('Farm Guide published evidence gates', () => {
+  it('matches explicit NAERLS exceptions and keeps ambiguous source names unresolved', () => {
+    const find = (state: string, lga: string) => {
+      const stateId = farmGuideData.states.find((item) => item.name === state)?.id;
+      const location = farmGuideData.locations.find((item) => item.stateId === stateId && item.name === lga);
+      assert.ok(location); return location;
+    };
+    assert.equal(find('Akwa Ibom', 'Eket').zoneId, 2);
+    assert.equal(find('Niger', 'Bosso').zoneId, 4);
+    assert.equal(find('Yobe', 'Damaturu').zoneId, 6);
+    assert.equal(find('Yobe', 'Nguru').zoneId, 7);
+    assert.equal(find('Plateau', 'Jos North').zoneId, 8);
+    assert.equal(find('Federal Capital Territory', 'Gwagwalada').zoneId, 4);
+    for (const [state,lga] of [['Katsina','Kankara'],['Kwara','Kaiama'],['Osun','Ife East'],['Ebonyi','Izzi'],['Anambra','Ayamelum']]) {
+      const location=find(state!,lga!); assert.equal(location.needsReview,true);
+      for(let month=1;month<=12;month++) assert.deepEqual(getReviewedCalendarForLocation(location.id,month,'plant'),[]);
+    }
+  });
+  it('publishes only traceable windows and preserves partial-month conditions', () => {
+    const northern=getFarmGuideCalendarEntries(5,6,'plant').find((entry)=>entry.crop==='Maize');
+    assert.ok(northern); assert.match(northern.window,/Last week of June/); assert.match(northern.conditions,/established rains/);
+    assert.equal(getFarmGuideCalendarEntries(5,5,'plant').some((entry)=>entry.crop==='Maize'),false);
+    const humid=getFarmGuideCalendarEntries(2,3,'plant').find((entry)=>entry.crop==='Maize');
+    assert.ok(humid); assert.match(humid.conditions,/SAMMAZ 63/);
+    for(const zone of farmGuideData.zones) for(let month=1;month<=12;month++) {
+      for(const entry of getFarmGuideCalendarEntries(zone.id,month,'plant')) {
+        assert.equal(entry.status,'source_reviewed'); assert.match(entry.source,/^https:\/\//);
+        assert.ok(entry.window && entry.conditions && entry.sourceLocator && entry.reviewedOn);
+      }
+      assert.deepEqual(getFarmGuideCalendarEntries(zone.id,month,'harvest'),[],'No unsupported harvest month should be shown');
+    }
   });
 });

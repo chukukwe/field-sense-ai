@@ -1,45 +1,34 @@
 # Farm Guide evidence and review
 
-Source review: 25 October 2026. This is a record of the implementation's evidence, not agronomist approval.
+Updated 26 October 2026. Published-source checking is not independent agronomist approval or field validation.
 
-## Published sources
+## Latest audit
 
-| Guidance | Source and scope | Application |
+- All 774 location records were compared against the [NAERLS ecological-zone table](https://nfhl.naerls.gov.ng/index.php?action=faq&cat=1&id=1&artlang=en), last updated May 2024.
+- 755 LGAs match a published classification; 309 zone assignments changed from the previous heuristic. The 19 ambiguous source entries are quarantined and cannot produce zone-based planting dates.
+- Coastal classifications use the source's broad Humid Forest group. Rainforest/swamp/mangrove subzones are not inferred from a state or LGA name.
+- All 277 legacy calendar rows lacked traceable authoritative citations and production-method/variety scope. They remain in the raw dataset for audit but are not served to farmers as reviewed recommendations.
+- Replacement published planting windows currently cover maize and groundnut where the evidence supports the zone. Partial-month language is preserved. Variety, water and local conditions appear with every window.
+- No source-reviewed harvest dates have been established; unsupported regional harvest-month claims are withheld.
+
+Audit files: [all location decisions](farm-guide-location-audit.csv), [all legacy calendar decisions](farm-guide-calendar-audit.csv), [agronomist review pack](farm-guide-agronomist-review.md).
+
+## Calendar sources
+
+| Source | Evidence applied | Limits |
 | --- | --- | --- |
-| Cassava | [IITA, Agronomy of cassava, Research Guide 60 (1997)](https://cgspace.cgiar.org/items/e78b8dc2-da35-4306-9eeb-bae56727242a) | Healthy mature stem cuttings, adequate moisture, drainage, early weed control. Harvest depends on variety and conditions. No uniform planting or harvest date is inferred. |
-| Maize | [NAERLS, planting date/time/method for SAMMAZ 63, updated May 2024](https://nfhl.naerls.gov.ng/index.php?action=faq&cat=24&id=4&artlang=en) | Established rains matter and timing varies across years and zones. The humid-zone month ranges in this variety-specific entry are not applied nationwide. |
-| Plantain | [FARA, Innovation Opportunities in Plantain Production in Nigeria (2016), pp. 8–9](https://library.faraafrica.org/wp-content/uploads/2019/10/Guidebook-Plantain-production-in-Nigeria-rev.pdf) | Rainy-season establishment, moisture needs, timely field care, and crop/market-based maturity assessment. No LGA calendar rows are added from these broad observations. |
-| Okra | [NAERLS, Okra agronomic practices](https://kms.naerls.gov.ng/variety/viewdetails/176) | Direct sowing, establishment checks, early replacement of failed stands, weeding, and tender-pod harvesting. This is not generic advice for every vegetable. |
-| Seasonal climate | [NiMet seasonal outlook](https://nimet.gov.ng/scp?id=3), [2026 launch advisory](https://nimet.gov.ng/news?id=194) | Link farmers to the official outlook. Early showers do not establish rainy-season onset. The app retrieves the exact state/LGA/year seasonal rainfall record from the NiMet API. This is separate from the national advisory and from daily weather. |
+| [IITA, Guide to Maize Production in Northern Nigeria (2020)](https://www.iita.org/wp-content/uploads/2020/07/Guide-to-Maize-Production-in-Northern-Nigeria.pdf), printed page 7 | Rain-fed maize windows for Southern Guinea, Northern Guinea and Sudan savannas | Established rains and suitable local variety required; not a current-year farm forecast. |
+| [NAERLS, SAMMAZ 63 planting date](https://nfhl.naerls.gov.ng/index.php?action=faq&cat=24&id=4&artlang=en), May 2024 | Two humid-zone maize seasons | Explicitly restricted to the source's variety and zone. |
+| [ICRISAT/FMARD, A Farmer's Guide to Profitable Groundnut Production in Nigeria (2015)](https://mel.cgiar.org/reporting/downloadmelspace/hash/MePOgapv/v/1ab63739a9086328bd998eb2238ab4d5), printed page 3 Table 1 and page 10 | Zone/variety-specific wet-season windows and conditional irrigated dry-season windows | Soil moisture, cold and irrigation constraints retained. No transfer of highland suitability is inferred. |
 
-The app's text is a concise paraphrase. Detailed spacing, pesticide and fertiliser prescriptions are not copied into a location-general plan.
+Source ages are displayed, not disguised as recent research. Calendar windows must still be checked against local conditions and expert advice.
 
-## Calendar and locations
+## Care and seasonal prediction
 
-The existing dataset contains Nigeria's 36 states and FCT and 774 LGAs. Its LGA zone assignments are heuristic; 375 are flagged for additional review. All assignments remain described as approximate. Calendar rows remain draft, and none are promoted to verified by this release. Existing source strings describing general knowledge are not presented as authoritative citations.
+General cassava care cites [IITA research guide 60](https://cgspace.cgiar.org/items/e78b8dc2-da35-4306-9eeb-bae56727242a); plantain care cites [FARA's Nigerian production guide](https://library.faraafrica.org/wp-content/uploads/2019/10/Guidebook-Plantain-production-in-Nigeria-rev.pdf); okra care cites [NAERLS](https://kms.naerls.gov.ng/variety/viewdetails/176). These sources do not establish a month-by-month calendar for every location.
 
-The calendar shows possible planting windows and typical regional harvest windows, not instructions to plant or harvest now. Water choice defaults to rainfall only. Dry-season planting entries are omitted for that choice. Selecting reliable irrigation includes existing dry-season entries but does not establish crop suitability or guarantee water sufficiency. A missing entry means missing data, not that a crop cannot grow there. Harvest readiness must be assessed using planting date, variety, and actual crop condition.
+The existing private NiMet key successfully returned the exact 2026 Eket record from the official seasonal rainfall API. The app matches state/LGA/year exactly and caches results for at most 12 hours. Retrieval time is distinguished from publication time. Rain onset/end and annual rainfall are predictions, not observed daily weather, and do not establish field readiness. No nearby location or older year is silently substituted.
 
-## Behavior delivered
+## Outstanding independent review
 
-- Immediate local planning, without a simulated network/loading delay.
-- Month selection and December-to-January rollover.
-- Per-area water/crop choices saved on the current device, with graceful failure if storage is blocked.
-- Crop care independent of calendar availability, including plantain and okra.
-- Visible source scope, source-check date, and pending local agronomist review.
-- General introduction notes for other existing crops remain labelled pending source review.
-- Cached crop guidance remains local. The authenticated NiMet outlook calls the backend, which uses the private key. Source links require internet access.
-
-## Remaining work requiring additional evidence
-
-1. Review location-to-zone mappings against a licensed, authoritative agricultural-zone boundary dataset or local extension review. State-level descriptions cannot validate an LGA boundary.
-2. Review every calendar row for crop, zone, season, production method, variety and source. National seasonal forecasts do not establish all of these facts.
-3. Obtain agronomist/extension review before labelling guidance verified.
-4. A live weather feature needs validated farm coordinates (with the farmer's consent), suitable provider terms, freshness/failure handling, and clear differentiation between forecasts and observations. LGA names or heuristic zones are not substituted for farm coordinates. No paid service, account, geolocation permission, or API key was added.
-5. Expand crop-specific source coverage and planting-date-based crop management plans after variety and production-method review.
-
-No claim is made that a forecast, agronomist review, or authoritative zone correction has been completed.
-
-## NiMet integration verified
-
-The existing private NIMET_API_KEY returned HTTP 200 from https://api.nimet.gov.ng/api/srp for Akwa Ibom / Eket / 2026. NiMet returned Eket and a partial-name match for Esit-Eket; only the exact area and year are used. Fields observed: onset, season_end, season_length, annual_rainfall, year, lga_name and state_name. FarmPal labels dates and totals as predictions, provides retrieval time, caches for at most 12 hours, and does not use these values to verify the draft calendar. The national-outlook redirect is removed from the plan. Daily forecasts and farm-coordinate weather remain future work.
+Clarify the 19 ambiguous locations. Obtain crop-specific published windows for the remaining crops, resolve conflicting evidence, and obtain qualified local review and field validation. No recommendation is labelled agronomist-verified. A ready-to-share checklist is in the review pack; no third party has been contacted.

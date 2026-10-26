@@ -48,12 +48,12 @@ Configure the existing Supabase bucket as private and allow the image content ty
 
 ## Farm Guide
 
-- Farm Guide opens a local plan immediately after state/LGA selection. Farmers can choose a month and water supply, including December-to-January planning. Rainfall-only plans exclude dry-season planting entries; irrigation does not establish suitability.
-- State/LGA names come from the MIT-licensed `xosasx/nigerian-local-government-areas` dataset; see `src/data/LGA_SOURCE_LICENSE.txt`. Zone assignments remain approximate and 375 LGAs are flagged for review. This release does not replace those assignments with an unverified map.
-- Calendar rows remain draft and are labelled as estimates. Regional harvest windows do not predict a farmer's harvest date. NiMet seasonal rainfall predictions load through the authenticated API; they are not current weather observations. No farm-coordinate service is called.
+- Farm Guide opens a local plan after state/LGA selection. Farmers can choose a month and water supply. Only source-reviewed windows are served; rainfall-only plans exclude dry-season entries. Irrigation does not establish suitability.
+- State/LGA names come from the MIT-licensed `xosasx/nigerian-local-government-areas` dataset; see `src/data/LGA_SOURCE_LICENSE.txt`. 755 LGA zone assignments match the published NAERLS table. The 19 ambiguous source entries remain unresolved; their zone-based planting dates are withheld. These are broad classifications, not surveyed farm boundaries.
+- All 277 legacy draft calendar rows are retained for audit but withheld from recommendations. Published maize and groundnut windows include their exact date wording, source, variety and water conditions. Unverified harvest dates are withheld. NiMet seasonal rainfall predictions load through the authenticated API; they are not current weather observations. No farm-coordinate service is called.
 - The crop care library works independently of calendar availability. Cassava, maize, plantain and okra have source-linked general guidance from IITA, NAERLS and FARA; other crop notes remain explicitly pending source review. None are marked agronomist-verified.
 - Water and crop preferences are saved per selected area on this device, with a fallback when local storage is blocked. Basic guidance remains available offline once the app is cached; the NiMet outlook and external source links require a connection.
-- See `docs/farm-guide-evidence.md` for source scope, remaining data review and weather integration requirements.
+- See `docs/farm-guide-evidence.md`, the full CSV audits, and `docs/farm-guide-agronomist-review.md` for evidence, unresolved cases and independent review requirements.
 
 
 ## Environment variables

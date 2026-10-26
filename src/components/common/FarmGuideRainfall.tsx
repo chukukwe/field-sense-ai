@@ -35,6 +35,6 @@ export function FarmGuideRainfall({ stateId, lgaId, areaName }: { stateId: numbe
       ['Predicted annual rainfall', record.annualRainfall !== undefined ? `${record.annualRainfall.toLocaleString()} mm` : 'Not provided'],
     ].map(([label, value]) => <div key={label}><dt className="text-[11px] text-[#B4C5BA]">{label}</dt><dd className="mt-1 text-sm font-semibold text-white">{value}</dd></div>)}</dl>}
     {result && <p className="mt-3 text-[10px] text-[#B4C5BA]">Source: NiMet seasonal rainfall API. Retrieved {new Intl.DateTimeFormat('en-NG', { dateStyle: 'medium', timeZone: 'Africa/Lagos' }).format(new Date(result.fetchedAt))}. The service caches data for up to 12 hours.</p>}
-    <p className="mt-3 text-[11px] leading-relaxed text-[#C6D2CA]">This is a seasonal prediction for {year}, not today’s weather or observed rainfall. Check field conditions before planting. It does not verify the draft crop calendar.</p>
+    <p className="mt-3 text-[11px] leading-relaxed text-[#C6D2CA]">This is a seasonal prediction for {year}, not today’s weather or observed rainfall. Check field conditions before planting. It does not establish field readiness.</p>
   </section>;
 }

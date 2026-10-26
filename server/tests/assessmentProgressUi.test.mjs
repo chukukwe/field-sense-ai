@@ -642,7 +642,7 @@ test('unmounting clears the progress interval', async () => {
   }
 });
 
-test('Farm Guide opens an offline plan with honest seasonal estimates, crop care and saved choices', async () => {
+test('Farm Guide opens an offline plan with published zone evidence and reviewed date windows, crop care and saved choices', async () => {
   const appContext = { setHelpModalOpen() {}, scans: [] };
   const originalFetch = globalThis.fetch;
   let fetchCalls = 0;
@@ -670,22 +670,24 @@ test('Farm Guide opens an offline plan with honest seasonal estimates, crop care
       selects[1].value = eket.value;
       selects[1].dispatchEvent(new browserWindow.Event('change', { bubbles: true }));
     });
-    assert.match(mount.host.textContent, /Estimated farming zone/);
-    assert.match(mount.host.textContent, /Mangrove \/ Freshwater Swamp/);
+    assert.match(mount.host.textContent, /Published LGA farming-zone classification/);
+    assert.match(mount.host.textContent, /Humid Forest/);
     const seePlan = [...mount.host.querySelectorAll('button')].find((button) => button.textContent.trim() === 'See plan');
     assert.ok(seePlan);
     assert.equal(seePlan.disabled, false);
     await act(async () => { seePlan.dispatchEvent(new browserWindow.MouseEvent('click', { bubbles: true })); });
     assert.doesNotMatch(mount.host.textContent, /Putting your farm plan together/);
     assert.match(mount.host.textContent, /Eket, Akwa Ibom/);
-    assert.match(mount.host.textContent, /Mangrove \/ Freshwater Swamp/);
+    assert.match(mount.host.textContent, /Humid Forest/);
     assert.match(mount.host.textContent, /Crop calendar/);
     assert.match(mount.host.textContent, /Possible planting windows/);
-    assert.match(mount.host.textContent, /draft seasonal estimates/);
-    assert.match(mount.host.textContent, /not a live weather forecast/i);
-    const cassavaCard = [...mount.host.querySelectorAll('button')].find((button) => button.textContent.includes('Cassava'));
+    assert.match(mount.host.textContent, /Only source-reviewed planting windows/);
+    assert.match(mount.host.textContent, /not a current weather forecast/i);
+    const monthChoice = mount.host.querySelectorAll('select')[0];
+    await act(async () => { monthChoice.value = '3'; monthChoice.dispatchEvent(new browserWindow.Event('change', {bubbles:true})); });
+    const cassavaCard = [...mount.host.querySelectorAll('button')].find((button) => button.textContent.includes('Maize'));
     assert.ok(cassavaCard);
-    assert.equal(cassavaCard.querySelector('img')?.getAttribute('src'), '/assets/thumb-cassava.png');
+    assert.equal(cassavaCard.querySelector('img')?.getAttribute('src'), '/assets/thumb-maize.png');
     await act(async () => { cassavaCard.dispatchEvent(new browserWindow.MouseEvent('click', { bubbles: true })); });
     assert.match(mount.host.textContent, /How to plant/);
     assert.match(mount.host.textContent, /stem cuttings/i);
