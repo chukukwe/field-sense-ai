@@ -4,6 +4,7 @@ import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/useAuth';
 import { AppLayout } from './components/common/AppLayout';
 import { AuthScreen } from './pages/AuthScreen';
+import { EquipmentScreen } from './pages/EquipmentScreen';
 import { HomeScreen } from './pages/HomeScreen';
 import { ScanScreen } from './pages/ScanScreen';
 import { ScanningScreen } from './pages/ScanningScreen';
@@ -49,6 +50,7 @@ export function App() {
           <Route element={<ProtectedRoutes />}>
             <Route element={<ApplicationLayout />}>
               <Route path="/" element={<HomeScreen />} />
+              <Route path="/equipment" element={<EquipmentScreen />} />
               <Route path="/scan" element={<ScanScreen />} />
               <Route path="/scanning" element={<ScanningScreen />} />
               <Route path="/assessment/:id" element={<CropAssessmentScreen />} />

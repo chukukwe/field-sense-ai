@@ -1,3 +1,4 @@
+import { firestoreEquipmentStore } from './equipmentStore.js';
 import { createNimetService } from './nimet.js';
 import 'dotenv/config';
 import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
@@ -51,6 +52,7 @@ if (!photoStore) {
 }
 const nimet = createNimetService(process.env.NIMET_API_KEY);
 const app = createApp({
+  equipmentStore: firestoreEquipmentStore(db),
   getSeasonalRainfall: (input) => nimet.getSeasonalRainfall(input),
   allowedOrigins,
   maxImageBytes: maxImageMb * 1024 * 1024,

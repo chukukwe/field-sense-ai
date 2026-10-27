@@ -87,6 +87,7 @@ export const HomeScreen: React.FC = () => {
           <span className="flex shrink-0 items-center gap-1 rounded-lg bg-[#176B45] px-2.5 py-2 text-[10px] font-bold text-white sm:px-3 sm:text-xs">See plan</span>
         </button>
 
+        <button type="button" onClick={() => navigate('/equipment')} className="rounded-2xl border border-[#47603C] bg-[#29392A] p-4 text-left"><span className="block text-sm font-bold text-white">Tractor Together</span><span className="mt-1 block text-xs text-gray-300">Share a tractor trip with nearby farmers.</span><span className="mt-2 block text-xs font-semibold text-green-300">Eket pilot · Find or start a group →</span></button>
         {/* ── Recent Scans Section ── */}
         <div className="flex flex-col gap-3">
           {/* Section header */}

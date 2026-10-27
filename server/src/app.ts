@@ -1,3 +1,4 @@
+import { equipmentRouter, type EquipmentStore } from './equipment.js';
 import { farmGuideData, getFarmGuideLocation } from '../../src/data/farmGuideData.js';
 import { NimetServiceError, type SeasonalRainfallRequest, type SeasonalRainfallResult } from './nimet.js';
 import cors from 'cors';
@@ -37,6 +38,7 @@ export function resolveRateLimitClientKey(
 }
 
 export interface AnalyzeDependencies {
+  equipmentStore?: EquipmentStore;
   verifyIdToken: (token: string) => Promise<{ uid: string }>;
   claimScan: (
     uid: string,
@@ -214,6 +216,7 @@ export function createApp(deps: AnalyzeDependencies) {
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type'],
   }));
+  if (deps.equipmentStore) app.use('/api/equipment', equipmentRouter(deps.equipmentStore, deps.verifyIdToken, rateLimitClientKey));
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
   const rainfallLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false, keyGenerator: rateLimitClientKey });
   app.get('/api/farm-guide/rainfall', rainfallLimiter, (req, res) => {
